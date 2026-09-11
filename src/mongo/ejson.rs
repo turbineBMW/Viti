@@ -169,7 +169,7 @@ pub fn type_class(b: &Bson) -> &'static str {
 /// One-line rendering of a value for cards and table cells.
 pub fn summary(b: &Bson, max: usize) -> String {
     let s = match b {
-        Bson::String(s) => format!("\"{s}\""),
+        Bson::String(s) => format!("\"{}\"", truncate(s, max)),
         Bson::Document(d) => {
             if d.is_empty() {
                 "{}".into()
@@ -195,7 +195,22 @@ pub fn summary(b: &Bson, max: usize) -> String {
             }
         }
         Bson::Decimal128(v) => v.to_string(),
-        Bson::RegularExpression(r) => format!("/{}/{}", r.pattern, r.options),
+        Bson::RegularExpression(r) => {
+            format!(
+                "/{}/{}",
+                truncate(r.pattern.as_str(), max),
+                truncate(r.options.as_str(), max)
+            )
+        }
+        Bson::JavaScriptCode(s) | Bson::Symbol(s) if max != usize::MAX => truncate(s, max),
+        Bson::JavaScriptCodeWithScope(s) if max != usize::MAX => {
+            format!(
+                "{} ({} scope fields)",
+                truncate(&s.code, max),
+                s.scope.len()
+            )
+        }
+        Bson::DbPointer(_) if max != usize::MAX => "DBPointer(…)".into(),
         Bson::Binary(bin) => format!(
             "Binary({} bytes, subtype {:?})",
             bin.bytes.len(),
@@ -212,11 +227,17 @@ fn compact_value(b: &Bson) -> String {
 }
 
 pub fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
+    if max == 0 {
+        return String::new();
     }
-    let cut: String = s.chars().take(max.saturating_sub(1)).collect();
-    format!("{cut}…")
+    // Stop at the display limit, even for multi-megabyte strings.
+    let mut chars = s.chars();
+    let mut out: String = chars.by_ref().take(max).collect();
+    if chars.next().is_some() {
+        out.pop();
+        out.push('…');
+    }
+    out
 }
 
 /// Display an `_id` the way mongosh prints it.
@@ -900,6 +921,14 @@ mod tests {
         assert_eq!(summary(&Bson::Double(3.0), 10), "3.0");
         assert_eq!(summary(&Bson::Array(vec![]), 20), "[ 0 elements ]");
         assert_eq!(truncate("abcdef", 4), "abc…");
+        assert_eq!(truncate("🦀é界abc", 4), "🦀é界…");
+        assert_eq!(truncate("abc", 0), "");
+        assert_eq!(truncate("abc", 1), "…");
+        assert_eq!(truncate("abc", 3), "abc");
+        assert_eq!(
+            summary(&Bson::String("x".repeat(5_000_000)), 8),
+            "\"xxxxxx…"
+        );
     }
 
     #[test]

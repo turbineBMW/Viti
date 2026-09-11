@@ -16,6 +16,12 @@ pub fn setup(pane: &Rc<DocumentsPane>) {
         view.set_can_focus(false);
         view.set_focusable(false);
         frame.append(&view);
+        let notice = gtk::Label::builder()
+            .label("Preview shortened · Open the document to see all fields and values")
+            .css_classes(["viti-doc-more"])
+            .xalign(0.0)
+            .build();
+        frame.append(&notice);
         item.set_child(Some(&frame));
     });
     let weak: Weak<DocumentsPane> = Rc::downgrade(pane);
@@ -38,15 +44,16 @@ pub fn setup(pane: &Rc<DocumentsPane>) {
         } else {
             frame.remove_css_class("viti-marked");
         }
+        let (preview, truncated) = super::preview::document(doc);
         let text = if pane.expanded_all.get() {
-            ejson::pretty(doc, Mode::Relaxed)
+            ejson::pretty(&preview, Mode::Relaxed)
         } else {
             // Collapsed: nested documents/arrays on one line each.
-            collapsed_text(doc)
+            format_collapsed(&preview)
         };
         view.buffer().set_text(&text);
+        frame.last_child().unwrap().set_visible(truncated);
     });
-    pane.json_view.set_model(Some(&pane.selection));
     pane.json_view.set_factory(Some(&factory));
     pane.json_view.set_single_click_activate(false);
     pane.json_view.add_css_class("navigation-sidebar");
@@ -54,6 +61,15 @@ pub fn setup(pane: &Rc<DocumentsPane>) {
 
 /// Top-level fields one per line; nested values compact.
 pub fn collapsed_text(doc: &bson::Document) -> String {
+    let (preview, truncated) = super::preview::document(doc);
+    let mut text = format_collapsed(&preview);
+    if truncated {
+        text.push_str("\n// Preview shortened · Open the document to see all fields and values");
+    }
+    text
+}
+
+fn format_collapsed(doc: &bson::Document) -> String {
     let mut out = String::from("{\n");
     let n = doc.len();
     for (i, (k, v)) in doc.iter().enumerate() {

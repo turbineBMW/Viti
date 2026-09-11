@@ -185,14 +185,19 @@ pub async fn find_page(
     ctx: &OpCtx,
 ) -> Result<Vec<Document>> {
     let coll = ns.collection(client);
-    let mut skip = spec.skip + page_skip;
-    let mut limit = page_size;
+    if page_size == 0 {
+        return Ok(Vec::new());
+    }
+    let skip = spec
+        .skip
+        .checked_add(page_skip)
+        .context("page offset is too large")?;
+    let mut limit = page_size.min(i64::MAX as u64);
     if spec.limit > 0 {
         if page_skip >= spec.limit {
             return Ok(Vec::new());
         }
         limit = limit.min(spec.limit - page_skip);
-        skip = spec.skip + page_skip;
     }
     let mut find = coll
         .find(spec.filter.clone())
@@ -1353,6 +1358,75 @@ mod tests {
 #[cfg(test)]
 mod live {
     use super::*;
+
+    #[tokio::test]
+    async fn find_pages_respect_query_window() {
+        let Ok(uri) = std::env::var("VITI_TEST_URI") else {
+            return;
+        };
+        let client = Client::with_uri_str(uri).await.unwrap();
+        let ns = Namespace::new(
+            &format!("viti_it_{}", uuid::Uuid::new_v4().simple()),
+            "pages",
+        );
+        let ctx = OpCtx::new(10_000);
+        insert_many(
+            &client,
+            &ns,
+            (0..55)
+                .map(|i| doc! { "_id": i, "n": i, "hidden": true })
+                .collect(),
+        )
+        .await
+        .unwrap();
+        let spec = FindSpec {
+            sort: Some(doc! { "_id": 1 }),
+            ..Default::default()
+        };
+        assert_eq!(
+            find_page(&client, &ns, &spec, 0, 26, &ctx)
+                .await
+                .unwrap()
+                .len(),
+            26
+        );
+        let last = find_page(&client, &ns, &spec, 50, 26, &ctx).await.unwrap();
+        assert_eq!(last.len(), 5);
+        assert_eq!(last[0].get_i32("_id").unwrap(), 50);
+        let spec = FindSpec {
+            filter: doc! { "n": { "$gte": 10 } },
+            skip: 3,
+            limit: 7,
+            sort: Some(doc! { "n": -1 }),
+            projection: Some(doc! { "hidden": 0 }),
+            ..Default::default()
+        };
+        let first = find_page(&client, &ns, &spec, 0, 6, &ctx).await.unwrap();
+        assert_eq!(first.len(), 6);
+        assert_eq!(first[0].get_i32("n").unwrap(), 51);
+        assert!(!first[0].contains_key("hidden"));
+        let last = find_page(&client, &ns, &spec, 5, 6, &ctx).await.unwrap();
+        assert_eq!(last.len(), 2);
+        assert_eq!(last[0].get_i32("n").unwrap(), 46);
+        assert!(
+            find_page(&client, &ns, &spec, 7, 6, &ctx)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            find_page(&client, &ns, &spec, 0, 0, &ctx)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            find_page(&client, &ns, &spec, u64::MAX, 6, &ctx)
+                .await
+                .is_err()
+        );
+        client.database(&ns.db).drop().await.unwrap();
+    }
 
     #[tokio::test]
     async fn manage_index_bulk_round_trip() {

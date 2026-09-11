@@ -8,7 +8,6 @@ use gtk4::glib::BoxedAnyObject;
 use std::rc::{Rc, Weak};
 
 pub fn setup(pane: &Rc<DocumentsPane>) {
-    pane.table_view.set_model(Some(&pane.selection));
     pane.table_view.set_reorderable(true);
     pane.table_view.set_show_row_separators(true);
     pane.table_view.set_show_column_separators(true);
@@ -17,6 +16,9 @@ pub fn setup(pane: &Rc<DocumentsPane>) {
 }
 
 pub fn rebuild_columns(pane: &DocumentsPane) {
+    if pane.view.get() != crate::config::DocView::Table {
+        return;
+    }
     let view = &pane.table_view;
     let existing = view.columns();
     while existing.n_items() > 0 {
@@ -75,7 +77,7 @@ pub fn rebuild_columns(pane: &DocumentsPane) {
                 label.remove_css_class("viti-marked");
             }
         });
-        let column = gtk::ColumnViewColumn::new(Some(&key), Some(factory));
+        let column = gtk::ColumnViewColumn::new(Some(&ejson::truncate(&key, 120)), Some(factory));
         column.set_resizable(true);
         column.set_expand(key != "_id");
         view.append_column(&column);

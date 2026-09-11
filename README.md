@@ -70,6 +70,12 @@ in an entry, editor or terminal; Escape returns to the pane.
 
 Bindings live in `~/.config/viti/keybindings.json` and reload on save.
 
+Collection pages render only the selected view. Large values and nested structures
+use bounded previews; a notice marks shortened previews. Open a document to see its
+full contents, or copy/edit/export it as usual. Table previews show up to 64 columns.
+Paging fetches one page plus one lookahead document, and collection counts update
+separately and are reused until the query changes or you refresh.
+
 ## Config
 
 `~/.config/viti/`: `config.json`, `connections.json` (no passwords — those go to the

@@ -22,13 +22,14 @@ pub fn setup(pane: &Rc<DocumentsPane>) {
         // A click on the card selects it and opens the document dialog.
         let click = gtk::GestureClick::new();
         click.set_button(gtk::gdk::BUTTON_PRIMARY);
-        let item2 = item.clone();
+        let item2 = item.downgrade();
         let weak = weak_setup.clone();
         click.connect_released(move |_, n, _, _| {
             if n != 1 {
                 return;
             }
             let Some(pane) = weak.upgrade() else { return };
+            let Some(item2) = item2.upgrade() else { return };
             let pos = item2.position();
             if pos != gtk::INVALID_LIST_POSITION {
                 pane.selection.set_selected(pos);
@@ -85,18 +86,24 @@ pub fn setup(pane: &Rc<DocumentsPane>) {
         card.append(&header);
         // Only the first few fields; the rest live behind the open dialog.
         let mut shown = 0usize;
-        let mut hidden = 0usize;
-        for (k, v) in doc.iter() {
-            if k == "_id" {
-                continue;
-            }
-            if shown < PREVIEW_ROWS {
-                card.append(&field_row(k, v, expanded, 0));
-                shown += 1;
-            } else {
-                hidden += 1;
+        for (k, v) in doc
+            .iter()
+            .filter(|(k, _)| k.as_str() != "_id")
+            .take(PREVIEW_ROWS)
+        {
+            let (preview, truncated) = super::preview::value(v);
+            card.append(&field_row(k, &preview, expanded, 0, Some(v)));
+            shown += 1;
+            if truncated {
+                let notice = gtk::Label::builder()
+                    .label("… Preview shortened · Open the document for the full value")
+                    .css_classes(["viti-doc-more"])
+                    .xalign(0.0)
+                    .build();
+                card.append(&notice);
             }
         }
+        let hidden = doc.len() - usize::from(doc.contains_key("_id")) - shown;
         if hidden > 0 {
             let more = gtk::Label::builder()
                 .label(format!("… {hidden} more fields"))
@@ -106,7 +113,6 @@ pub fn setup(pane: &Rc<DocumentsPane>) {
             card.append(&more);
         }
     });
-    pane.list_view.set_model(Some(&pane.selection));
     pane.list_view.set_factory(Some(&factory));
     pane.list_view.set_single_click_activate(false);
     pane.list_view.add_css_class("navigation-sidebar");
@@ -114,16 +120,23 @@ pub fn setup(pane: &Rc<DocumentsPane>) {
 
 /// One `key: value  Type` line; nested values get an expander whose body is
 /// built the first time it opens.
-fn field_row(key: &str, value: &Bson, expanded: bool, depth: usize) -> gtk::Widget {
+fn field_row(
+    key: &str,
+    value: &Bson,
+    expanded: bool,
+    depth: usize,
+    original: Option<&Bson>,
+) -> gtk::Widget {
+    let display = original.unwrap_or(value);
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     row.set_margin_start((depth * 16) as i32);
     let key_label = gtk::Label::builder()
-        .label(key)
+        .label(ejson::truncate(key, 120))
         .css_classes(["viti-key"])
         .xalign(0.0)
         .build();
     let type_badge = gtk::Label::builder()
-        .label(ejson::type_name(value))
+        .label(ejson::type_name(display))
         .css_classes(["viti-type"])
         .valign(gtk::Align::Center)
         .build();
@@ -135,7 +148,7 @@ fn field_row(key: &str, value: &Bson, expanded: bool, depth: usize) -> gtk::Widg
                 _ => false,
             };
             let summary = gtk::Label::builder()
-                .label(ejson::summary(value, 60))
+                .label(ejson::summary(display, 60))
                 .css_classes(["viti-value", "viti-dim"])
                 .xalign(0.0)
                 .hexpand(true)
@@ -162,12 +175,12 @@ fn field_row(key: &str, value: &Bson, expanded: bool, depth: usize) -> gtk::Widg
                 match &value {
                     Bson::Document(d) => {
                         for (k, v) in d.iter() {
-                            body.append(&field_row(k, v, expanded, 0));
+                            body.append(&field_row(k, v, false, 0, None));
                         }
                     }
                     Bson::Array(a) => {
                         for (i, v) in a.iter().enumerate() {
-                            body.append(&field_row(&i.to_string(), v, expanded, 0));
+                            body.append(&field_row(&i.to_string(), v, false, 0, None));
                         }
                     }
                     _ => {}
@@ -188,14 +201,14 @@ fn field_row(key: &str, value: &Bson, expanded: bool, depth: usize) -> gtk::Widg
         }
         _ => {
             let value_label = gtk::Label::builder()
-                .label(ejson::summary(value, 200))
-                .css_classes(["viti-value", ejson::type_class(value)])
+                .label(ejson::summary(display, 200))
+                .css_classes(["viti-value", ejson::type_class(display)])
                 .xalign(0.0)
                 .hexpand(true)
                 .ellipsize(gtk::pango::EllipsizeMode::End)
                 .selectable(false)
                 .build();
-            value_label.set_tooltip_text(Some(&ejson::summary(value, 2000)));
+            value_label.set_tooltip_text(Some(&ejson::summary(display, 2000)));
             row.append(&key_label);
             row.append(&value_label);
             row.append(&type_badge);

@@ -3,6 +3,7 @@
 //! in `list`/`json`/`table` are factories over the shared `model`/`selection`.
 pub mod json;
 pub mod list;
+mod preview;
 pub mod table;
 
 use crate::app::App;
@@ -57,6 +58,11 @@ pub struct DocumentsPane {
     pub column_cursor: Cell<usize>,
     inflight: RefCell<Option<(OpCtx, tokio::task::AbortHandle)>>,
     generation: Cell<u64>,
+    count_generation: Cell<u64>,
+    count_inflight: RefCell<Option<tokio::task::AbortHandle>>,
+    busy: Cell<bool>,
+    has_more: Cell<bool>,
+    loaded_page: Cell<u64>,
     /// Weak self for the view factories (they outlive any borrow of `pane`).
     pub(super) me: RefCell<Weak<DocumentsPane>>,
 }
@@ -235,7 +241,7 @@ impl DocumentsPane {
             marked: RefCell::new(BTreeSet::new()),
             view: Cell::new(settings.default_view),
             page: Cell::new(0),
-            page_size: Cell::new(settings.page_size as u64),
+            page_size: Cell::new(settings.page_size.clamp(1, 100) as u64),
             total: Cell::new(None),
             query: RefCell::new(Query::default()),
             spec: RefCell::new(FindSpec::default()),
@@ -245,6 +251,11 @@ impl DocumentsPane {
             column_cursor: Cell::new(0),
             inflight: RefCell::new(None),
             generation: Cell::new(0),
+            count_generation: Cell::new(0),
+            count_inflight: RefCell::new(None),
+            busy: Cell::new(false),
+            has_more: Cell::new(false),
+            loaded_page: Cell::new(0),
             me: RefCell::new(Weak::new()),
         });
         *pane.me.borrow_mut() = Rc::downgrade(&pane);
@@ -306,6 +317,7 @@ impl DocumentsPane {
                 else {
                     return;
                 };
+                let n = n.clamp(1, 100);
                 a.set_state(&n.to_string().to_variant());
                 if p.page_size.get() != n {
                     p.page_size.set(n);
@@ -513,6 +525,8 @@ impl DocumentsPane {
 
     fn apply_view(&self) {
         let v = self.view.get();
+        self.detach_views();
+        self.attach_view();
         self.views.set_visible_child_name(match v {
             DocView::List => "list",
             DocView::Json => "json",
@@ -529,6 +543,23 @@ impl DocumentsPane {
         self.update_status();
     }
 
+    fn detach_views(&self) {
+        self.list_view.set_model(None::<&gtk::SingleSelection>);
+        self.json_view.set_model(None::<&gtk::SingleSelection>);
+        self.table_view.set_model(None::<&gtk::SingleSelection>);
+    }
+
+    fn attach_view(&self) {
+        match self.view.get() {
+            DocView::List => self.list_view.set_model(Some(&self.selection)),
+            DocView::Json => self.json_view.set_model(Some(&self.selection)),
+            DocView::Table => {
+                table::rebuild_columns(self);
+                self.table_view.set_model(Some(&self.selection));
+            }
+        }
+    }
+
     pub fn cycle_view(&self) {
         self.view.set(self.view.get().next());
         self.apply_view();
@@ -541,14 +572,14 @@ impl DocumentsPane {
 
     fn update_status(&self) {
         let n = self.docs.borrow().len() as u64;
-        let start = self.page.get() * self.page_size.get();
+        let start = self.loaded_page.get().saturating_mul(self.page_size.get());
         let range = if n == 0 {
             "0".to_string()
         } else {
             format!(
                 "{}–{}",
-                crate::ui::thousands(start + 1),
-                crate::ui::thousands(start + n)
+                crate::ui::thousands(start.saturating_add(1)),
+                crate::ui::thousands(start.saturating_add(n))
             )
         };
         let total = match self.total.get() {
@@ -566,14 +597,16 @@ impl DocumentsPane {
         {
             parts.push(col);
         }
+        if self.view.get() == DocView::Table && self.columns.borrow().len() == 64 {
+            parts.push("64 column preview".into());
+        }
+        self.status
+            .set_tooltip_text(Some("Open a document to see all fields and values"));
         self.status.set_text(&parts.join(" · "));
-        let last_page = self
-            .total
-            .get()
-            .map(|t| start + n >= t)
-            .unwrap_or(n < self.page_size.get());
-        self.next_btn.set_sensitive(!last_page);
-        self.prev_btn.set_sensitive(self.page.get() > 0);
+        self.next_btn
+            .set_sensitive(!self.busy.get() && self.has_more.get());
+        self.prev_btn
+            .set_sensitive(!self.busy.get() && self.page.get() > 0);
     }
 
     // ----- loading --------------------------------------------------------
@@ -671,15 +704,65 @@ impl DocumentsPane {
                 }
                 app.toast("Query cancelled");
             }
+            self.page.set(self.loaded_page.get());
             self.set_busy(false);
         }
     }
 
     fn set_busy(&self, busy: bool) {
+        self.busy.set(busy);
         self.query_bar.set_busy(busy);
+        self.update_status();
     }
 
+    /// Refresh the query/count after edits or an explicit refresh. Page turns
+    /// only reload the page; they do not rescan matches for a fresh count.
     pub fn load(&self) {
+        self.refresh_count();
+        self.load_page();
+    }
+
+    fn refresh_count(&self) {
+        self.total.set(None);
+        if let Some(handle) = self.count_inflight.borrow_mut().take() {
+            handle.abort();
+        }
+        let generation = self.count_generation.get() + 1;
+        self.count_generation.set(generation);
+        let Some(app) = self.app() else { return };
+        let Some(conn) = app.conn(self.conn) else {
+            return;
+        };
+        let client = conn.client.clone();
+        let ns = self.ns.clone();
+        let spec = self.current_spec();
+        let ctx = OpCtx::new(app.max_time_ms());
+        let (tx, rx) = async_channel::bounded(1);
+        let handle = crate::rt::spawn(async move {
+            // The count is advisory. Bound wall time as well as server time.
+            let total = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                ops::count(&client, &ns, &spec, &ctx),
+            )
+            .await
+            .ok()
+            .flatten();
+            let _ = tx.send(total).await;
+        });
+        *self.count_inflight.borrow_mut() = Some(handle.abort_handle());
+        let weak = self.me.borrow().clone();
+        glib::spawn_future_local(async move {
+            let Ok(total) = rx.recv().await else { return };
+            let Some(me) = weak.upgrade() else { return };
+            if me.count_generation.get() == generation {
+                me.count_inflight.borrow_mut().take();
+                me.total.set(total);
+                me.update_status();
+            }
+        });
+    }
+
+    fn load_page(&self) {
         let Some(me) = self.me.borrow().upgrade() else {
             return;
         };
@@ -698,16 +781,25 @@ impl DocumentsPane {
         let spec = self.spec.borrow().clone();
         let ns = self.ns.clone();
         let client = conn.client.clone();
-        let page_skip = self.page.get() * self.page_size.get();
+        let page = self.page.get();
+        let page_skip = page.saturating_mul(self.page_size.get());
         let page_size = self.page_size.get();
         let (tx, rx) = async_channel::bounded(1);
         let ctx2 = ctx.clone();
         let handle = crate::rt::spawn(async move {
-            let (docs, total) = tokio::join!(
-                ops::find_page(&client, &ns, &spec, page_skip, page_size, &ctx2),
-                ops::count(&client, &ns, &spec, &ctx2)
-            );
-            let _ = tx.send(docs.map(|d| (d, total))).await;
+            // One lookahead document determines Next without waiting for a
+            // count, including filtered queries and query-bar limits.
+            let result = ops::find_page(&client, &ns, &spec, page_skip, page_size + 1, &ctx2)
+                .await
+                .map(|mut docs| {
+                    let has_more = docs.len() as u64 > page_size;
+                    if has_more {
+                        docs.pop();
+                    }
+                    let columns = page_columns(&docs);
+                    (docs, columns, has_more)
+                });
+            let _ = tx.send(result).await;
         });
         *self.inflight.borrow_mut() = Some((ctx, handle.abort_handle()));
         self.set_busy(true);
@@ -715,21 +807,24 @@ impl DocumentsPane {
         glib::spawn_future_local(async move {
             let Ok(result) = rx.recv().await else { return };
             if me.generation.get() != generation {
+                crate::rt::rt().spawn_blocking(move || drop(result));
                 return;
             }
             me.inflight.borrow_mut().take();
-            me.set_busy(false);
             match result {
-                Ok((docs, total)) => {
-                    me.total.set(total);
-                    me.set_docs(docs);
+                Ok((docs, columns, has_more)) => {
+                    me.loaded_page.set(page);
+                    me.has_more.set(has_more);
+                    me.set_docs(docs, columns);
                 }
                 Err(e) => {
+                    me.page.set(me.loaded_page.get());
                     if let Some(app) = me.app() {
                         app.toast_error(&format!("query on {}", me.ns), &e);
                     }
                 }
             }
+            me.set_busy(false);
         });
     }
 
@@ -750,28 +845,18 @@ impl DocumentsPane {
         }
     }
 
-    fn set_docs(&self, docs: Vec<Document>) {
+    fn set_docs(&self, docs: Vec<Document>, columns: Vec<String>) {
         let keep = self.cursor().unwrap_or(0);
         self.marked.borrow_mut().clear();
-        // Column union in first-seen order, `_id` first.
-        let mut cols: Vec<String> = vec!["_id".into()];
-        for d in &docs {
-            for k in d.keys() {
-                if !cols.iter().any(|c| c == k) {
-                    cols.push(k.clone());
-                }
-            }
-        }
-        if !docs.iter().any(|d| d.contains_key("_id")) {
-            cols.retain(|c| c != "_id");
-        }
-        *self.columns.borrow_mut() = cols;
-        *self.docs.borrow_mut() = docs;
-        let n = self.docs.borrow().len();
-        self.model.remove_all();
+        self.detach_views();
+        *self.columns.borrow_mut() = columns;
+        let n = docs.len();
+        let old = self.docs.replace(docs);
+        // Freeing large BSON trees can itself stall GTK.
+        crate::rt::rt().spawn_blocking(move || drop(old));
         let items: Vec<BoxedAnyObject> = (0..n).map(BoxedAnyObject::new).collect();
-        self.model.extend_from_slice(&items);
-        table::rebuild_columns(self);
+        self.model.splice(0, self.model.n_items(), &items);
+        self.attach_view();
         if n > 0 {
             self.set_cursor(keep.min(n - 1));
         }
@@ -794,20 +879,20 @@ impl DocumentsPane {
             return;
         }
         self.page.set(self.page.get() + 1);
-        self.load();
+        self.load_page();
     }
 
     pub fn prev_page(&self) {
-        if self.page.get() == 0 {
+        if self.busy.get() || self.page.get() == 0 {
             return;
         }
         self.page.set(self.page.get() - 1);
-        self.load();
+        self.load_page();
     }
 
     pub fn goto_page(&self, page: u64) {
         self.page.set(page.saturating_sub(1));
-        self.load();
+        self.load_page();
     }
 
     fn show_history(&self) {
@@ -1387,6 +1472,162 @@ impl DocumentsPane {
     pub fn bulk_delete(self: &Rc<Self>) {
         if let Some(app) = self.app() {
             crate::ui::bulk::delete_dialog(&app, self);
+        }
+    }
+}
+
+/// Bound table widget creation for very wide / heterogeneous documents. The
+/// complete fields are available by opening a document. Runs off the UI thread.
+fn page_columns(docs: &[Document]) -> Vec<String> {
+    const MAX_COLUMNS: usize = 64;
+    let mut columns = Vec::new();
+    let mut seen = HashSet::new();
+    if docs.iter().any(|d| d.contains_key("_id")) {
+        columns.push("_id".into());
+        seen.insert("_id");
+    }
+    for doc in docs {
+        for key in doc.keys().take(MAX_COLUMNS) {
+            if columns.len() == MAX_COLUMNS {
+                return columns;
+            }
+            if seen.insert(key.as_str()) {
+                columns.push(key.clone());
+            }
+        }
+    }
+    columns
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bson::doc;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn columns_are_bounded_and_keep_first_seen_order() {
+        assert_eq!(
+            page_columns(&[doc! { "b": 1, "_id": 0 }, doc! { "a": 2, "b": 3 }]),
+            vec!["_id", "b", "a"]
+        );
+        let wide: Document = (0..10_000)
+            .map(|i| (format!("k{i}"), Bson::Int32(i)))
+            .collect();
+        assert_eq!(page_columns(&[wide]).len(), 64);
+        assert!(page_columns(&[]).is_empty());
+    }
+
+    /// Run under xvfb-run with an isolated XDG_CONFIG_HOME. Optionally set
+    /// VITI_TEST_URI to an isolated MongoDB with enableTestCommands=1 to verify
+    /// that a delayed count does not delay pages. Never use a production server.
+    #[test]
+    #[ignore = "requires GTK display and isolated config; optional isolated MongoDB failpoints"]
+    fn gtk_large_document_pagination() {
+        adw::init().unwrap();
+        let application = adw::Application::builder()
+            .application_id("dev.turbinebmw.Viti.PaginationTest")
+            .flags(gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        application.register(None::<&gio::Cancellable>).unwrap();
+        let app = App::build(&application);
+        let conn_id = uuid::Uuid::new_v4();
+        let pane = DocumentsPane::new(
+            &app,
+            conn_id,
+            Namespace::new(
+                &format!("viti_it_{}", uuid::Uuid::new_v4().simple()),
+                "pages",
+            ),
+        );
+        app.window.set_content(Some(&pane.root));
+        let context = glib::MainContext::default();
+        context.block_on(async {
+            for view in [DocView::List, DocView::Json, DocView::Table] {
+                pane.set_view(view);
+                for expanded in [false, true] {
+                    pane.expanded_all.set(expanded);
+                    for page in 0..3 {
+                        // ~30 MB per page, with both large strings and arrays.
+                        let docs = crate::rt::io(async move {
+                            (0..25).map(|i| doc! { "_id": page * 25 + i,
+                                "text": "界".repeat(350_000),
+                                "array": vec![doc! { "x": 1 }; 10_000],
+                                "nested": { "a": { "b": { "c": [1, 2, 3] } } }
+                            }).collect::<Vec<_>>()
+                        }).await;
+                        let cols = page_columns(&docs);
+                        let started = Instant::now();
+                        pane.page.set(page as u64);
+                        pane.loaded_page.set(page as u64);
+                        pane.set_docs(docs, cols);
+                        pane.bottom();
+                        pane.top();
+                        glib::timeout_future(Duration::from_millis(25)).await;
+                        let elapsed = started.elapsed();
+                        eprintln!("{view:?} expanded={expanded} page={page}: {elapsed:?}");
+                        assert!(elapsed < Duration::from_secs(2), "GTK stalled: {elapsed:?}");
+                        assert_eq!(pane.list_view.model().is_some(), view == DocView::List);
+                        assert_eq!(pane.json_view.model().is_some(), view == DocView::Json);
+                        assert_eq!(pane.table_view.model().is_some(), view == DocView::Table);
+                        assert_eq!(pane.docs.borrow()[0].get_str("text").unwrap().len(), 1_050_000);
+                    }
+                }
+            }
+            if let Ok(uri) = std::env::var("VITI_TEST_URI") {
+                let ns = pane.ns.clone();
+                let client = crate::rt::io(async move {
+                    let client = mongodb::Client::with_uri_str(uri).await.unwrap();
+                    ops::insert_many(&client, &ns, (0..55).map(|i| doc! { "_id": i }).collect()).await.unwrap();
+                    client.database("admin").run_command(doc! {
+                        "configureFailPoint": "failCommand", "mode": { "times": 1 },
+                        "data": { "failCommands": ["count"], "blockConnection": true, "blockTimeMS": 2500 }
+                    }).await.unwrap();
+                    client
+                }).await;
+                app.conns.borrow_mut().push(Rc::new(crate::mongo::Conn {
+                    id: conn_id, client: client.clone(), profile: Default::default(),
+                    server: Default::default(), tunnel: None,
+                }));
+                pane.page_size.set(25);
+                pane.page.set(0);
+                pane.set_view(DocView::List);
+                let started = Instant::now();
+                pane.load();
+                wait_for_page(&pane).await;
+                assert!(started.elapsed() < Duration::from_secs(2));
+                assert!(pane.count_inflight.borrow().is_some(), "page should arrive before count");
+                let count_generation = pane.count_generation.get();
+                assert_eq!(pane.docs.borrow().len(), 25);
+                assert!(pane.next_btn.is_sensitive());
+                pane.next_page();
+                wait_for_page(&pane).await;
+                assert_eq!(pane.docs.borrow()[0].get_i32("_id").unwrap(), 25);
+                pane.next_page();
+                wait_for_page(&pane).await;
+                assert_eq!(pane.docs.borrow().len(), 5);
+                assert!(!pane.next_btn.is_sensitive());
+                pane.prev_page();
+                wait_for_page(&pane).await;
+                assert_eq!(pane.docs.borrow()[0].get_i32("_id").unwrap(), 25);
+                assert_eq!(pane.count_generation.get(), count_generation, "page turns must reuse count");
+                let db = pane.ns.db.clone();
+                crate::rt::io(async move {
+                    client.database("admin").run_command(doc! {
+                        "configureFailPoint": "failCommand", "mode": "off"
+                    }).await.unwrap();
+                    client.database(&db).drop().await.unwrap();
+                }).await;
+            }
+        });
+        app.window.destroy();
+    }
+
+    async fn wait_for_page(pane: &DocumentsPane) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while pane.busy.get() {
+            assert!(Instant::now() < deadline, "page load timed out");
+            glib::timeout_future(Duration::from_millis(10)).await;
         }
     }
 }
