@@ -3,6 +3,7 @@
 //! in `list`/`json`/`table` are factories over the shared `model`/`selection`.
 pub mod json;
 pub mod list;
+mod pagination;
 mod preview;
 pub mod table;
 
@@ -37,6 +38,8 @@ pub struct DocumentsPane {
     view_dropdown: gtk::DropDown,
     prev_btn: gtk::Button,
     next_btn: gtk::Button,
+    goto_btn: gtk::Button,
+    page_picker: RefCell<Option<pagination::PagePicker>>,
     /// Stateful menu actions kept in sync with the keyboard equivalents.
     expand_action: gio::SimpleAction,
 
@@ -99,8 +102,14 @@ impl DocumentsPane {
             .focus_on_click(false)
             .build();
         let pager = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        let goto_btn = gtk::Button::builder()
+            .label("Go to")
+            .tooltip_text(tip("Go to page", "docs.goto-page"))
+            .focus_on_click(false)
+            .build();
         pager.add_css_class("linked");
         pager.append(&prev_btn);
+        pager.append(&goto_btn);
         pager.append(&next_btn);
         let page_label = gtk::Label::builder().css_classes(["viti-count"]).build();
         let status = gtk::Label::builder()
@@ -233,6 +242,8 @@ impl DocumentsPane {
             view_dropdown: view_dropdown.clone(),
             prev_btn: prev_btn.clone(),
             next_btn: next_btn.clone(),
+            goto_btn: goto_btn.clone(),
+            page_picker: RefCell::new(None),
             expand_action: expand_action.clone(),
             conn,
             ns,
@@ -337,6 +348,10 @@ impl DocumentsPane {
         {
             let p = pane.clone();
             next_btn.connect_clicked(move |_| p.next_page());
+        }
+        {
+            let p = pane.clone();
+            goto_btn.connect_clicked(move |_| p.show_page_picker());
         }
         {
             let p = pane.clone();
@@ -607,6 +622,10 @@ impl DocumentsPane {
             .set_sensitive(!self.busy.get() && self.has_more.get());
         self.prev_btn
             .set_sensitive(!self.busy.get() && self.page.get() > 0);
+        self.goto_btn.set_sensitive(!self.busy.get());
+        if let Some(picker) = self.page_picker.borrow().as_ref() {
+            picker.update(self);
+        }
     }
 
     // ----- loading --------------------------------------------------------
@@ -891,6 +910,9 @@ impl DocumentsPane {
     }
 
     pub fn goto_page(&self, page: u64) {
+        if self.busy.get() {
+            return;
+        }
         self.page.set(page.saturating_sub(1));
         self.load_page();
     }

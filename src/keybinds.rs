@@ -263,6 +263,7 @@ pub const ACTIONS: &[Action] = &[
     ),
     a("docs.next-page", "Next page", "n", Scope::Documents),
     a("docs.prev-page", "Previous page", "b", Scope::Documents),
+    a("docs.goto-page", "Go to page", "<Alt>g", Scope::Documents),
     a(
         "docs.expand",
         "Expand / collapse fields",

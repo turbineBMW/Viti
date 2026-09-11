@@ -80,6 +80,9 @@ impl App {
     }
 
     fn on_chord(self: &Rc<Self>, id: &'static str) -> glib::Propagation {
+        if self.window.visible_dialog().is_some() {
+            return glib::Propagation::Proceed;
+        }
         let Some(action) = keybinds::find(id) else {
             return glib::Propagation::Proceed;
         };
@@ -108,6 +111,10 @@ impl App {
         state: gtk::gdk::ModifierType,
     ) -> glib::Propagation {
         use gtk::gdk::Key;
+        // Let modal dialogs own Tab, Enter and Escape as well as typing.
+        if self.window.visible_dialog().is_some() {
+            return glib::Propagation::Proceed;
+        }
         let window = self.window.clone().upcast::<gtk::Window>();
         if terminal_has_focus(&window) {
             return glib::Propagation::Proceed;

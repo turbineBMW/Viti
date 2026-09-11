@@ -51,6 +51,7 @@ in an entry, editor or terminal; Escape returns to the pane.
 | `A`, `D`, `Ctrl+D` | add, duplicate, delete |
 | `V`, `c`, `C` | multi-select, copy value, copy document |
 | `]` `[` `n` `b` | next/prev document, next/prev page |
+| `Alt+G` | go to page: first, last, or a page's document range |
 | `s` `S` `H` `r` | sort, sort by column, hide column, reset columns |
 | `u`, `Ctrl+Shift+D` | bulk update / bulk delete everything the filter matches |
 | `X`, `I` | export the collection / query (or the aggregation results) to JSON / CSV, import JSON / CSV |

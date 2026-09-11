@@ -1448,6 +1448,7 @@ impl App {
                     "docs.prev-doc" => d.move_cursor(-1),
                     "docs.next-page" => d.next_page(),
                     "docs.prev-page" => d.prev_page(),
+                    "docs.goto-page" => d.show_page_picker(),
                     "docs.expand" | "docs.expand-all" => d.toggle_expand_all(),
                     _ => return proceed,
                 }
