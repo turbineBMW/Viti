@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Viti
+Comment=MongoDB client with vi keys
+Exec=viti %u
+Icon=dev.turbinebmw.Viti
+Terminal=false
+Categories=Development;Database;GTK;
+Keywords=mongodb;mongo;database;compass;
+MimeType=x-scheme-handler/mongodb;x-scheme-handler/mongodb+srv;
+StartupNotify=true
+X-GNOME-UsesNotifications=true
