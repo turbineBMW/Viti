@@ -667,10 +667,15 @@ impl App {
                     // VITI_DEBUG_PIPELINE='[{ $match: {} }]' loads (and runs) a
                     // pipeline on the first tab's Aggregations page first.
                     let pipe = std::env::var("VITI_DEBUG_PIPELINE").unwrap_or_default();
+                    // VITI_DEBUG_DELAY=ms waits longer for slow first pages.
+                    let delay = std::env::var("VITI_DEBUG_DELAY")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(1500);
                     if !ids.is_empty() || !cmds.is_empty() || !pipe.is_empty() {
                         let a = self.clone();
                         glib::timeout_add_local_once(
-                            std::time::Duration::from_millis(1500),
+                            std::time::Duration::from_millis(delay),
                             move || {
                                 if !pipe.is_empty()
                                     && let Some(t) = a.current_tab()

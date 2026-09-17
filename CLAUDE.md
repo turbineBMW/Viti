@@ -25,7 +25,9 @@ Dev hooks: `viti mongodb://localhost:27017` saves a profile and connects on laun
 connected (one tab each); `VITI_DEBUG_PIPELINE='[{ $match: {} }]'` loads and runs a pipeline on the first tab's
 Aggregations page, `VITI_DEBUG_ACTION=id,id` runs action ids and
 `VITI_DEBUG_COMMAND=index;update {…}` runs `:` lines (`schema`, `validation`,
-`export csv`, `import /path.csv` open those pages / dialogs), in that order, 1.5 s after that;
+`export csv`, `import /path.csv` open those pages / dialogs; `perf` the Performance page;
+`ai <text>` asks the AI backend for the current page; `wait 3` pauses before the next line),
+in that order, 1.5 s after that (`VITI_DEBUG_DELAY=ms` changes the wait);
 `VITI_LOG=viti=debug` turns logging up (tracing env-filter syntax).
 `VITI_TEST_URI=mongodb://localhost:27017 cargo test live` runs the server round-trip
 tests in `mongo/ops.rs` and `mongo/export.rs` (export → import → validation; each creates

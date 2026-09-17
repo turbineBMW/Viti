@@ -987,7 +987,7 @@ impl DocumentsPane {
         had
     }
 
-    pub fn peek(&self, full: bool) {
+    pub fn peek(self: &Rc<Self>, full: bool) {
         let Some(doc) = self.current_doc() else {
             return;
         };
@@ -1015,8 +1015,15 @@ impl DocumentsPane {
             .icon_name("document-edit-symbolic")
             .tooltip_text("Edit (e)")
             .build();
+        let delete = gtk::Button::builder()
+            .icon_name("user-trash-symbolic")
+            .tooltip_text("Delete (Ctrl+D)")
+            .css_classes(["destructive-action", "flat"])
+            .visible(doc.contains_key("_id"))
+            .build();
         header.pack_end(&copy);
         header.pack_end(&edit);
+        header.pack_start(&delete);
         toolbar.add_top_bar(&header);
         let view = crate::ui::json_view(&text, false);
         view.set_can_focus(true);
@@ -1044,6 +1051,41 @@ impl DocumentsPane {
                 }
             });
         }
+        // Confirm over the quick view; it closes once the delete is confirmed.
+        let ask_delete: Rc<dyn Fn()> = {
+            let dialog = dialog.clone();
+            let me = self.clone();
+            let id = doc.get("_id").cloned();
+            Rc::new(move || {
+                let Some(id) = id.clone() else { return };
+                let Some(app) = me.app() else { return };
+                if app.write_guard().is_err() {
+                    return;
+                }
+                let parent = dialog.clone();
+                let dialog = dialog.clone();
+                let me = me.clone();
+                crate::ui::confirm(
+                    &parent,
+                    "Delete this document?",
+                    &format!(
+                        "{} from {}. This cannot be undone.",
+                        ejson::id_display(&id),
+                        me.ns
+                    ),
+                    "Delete",
+                    true,
+                    move || {
+                        dialog.close();
+                        me.delete_ids(vec![id.clone()], false);
+                    },
+                );
+            })
+        };
+        {
+            let ask = ask_delete.clone();
+            delete.connect_clicked(move |_| ask());
+        }
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         {
@@ -1051,6 +1093,7 @@ impl DocumentsPane {
             let text = text.clone();
             let app = app.clone();
             let scroller = scroller.clone();
+            let ask_delete = ask_delete.clone();
             keys.connect_key_pressed(move |_, key, _, state| {
                 use gtk::gdk::Key;
                 let ctrl = state.contains(gtk::gdk::ModifierType::CONTROL_MASK);
@@ -1076,6 +1119,10 @@ impl DocumentsPane {
                         if let Some(tab) = app.current_tab() {
                             tab.docs.edit_external();
                         }
+                        glib::Propagation::Stop
+                    }
+                    Key::d if ctrl => {
+                        ask_delete();
                         glib::Propagation::Stop
                     }
                     Key::j | Key::k | Key::g | Key::G => {
@@ -1369,9 +1416,16 @@ impl DocumentsPane {
                 .filter_map(|&i| docs.get(i).and_then(|d| d.get("_id").cloned()))
                 .collect()
         };
-        if ids.is_empty() {
+        self.delete_ids(ids, confirm);
+    }
+
+    /// Delete these `_id`s (the quick view deletes the one it shows).
+    pub fn delete_ids(self: &Rc<Self>, ids: Vec<Bson>, confirm: bool) {
+        let Some(app) = self.app() else { return };
+        if ids.is_empty() || app.write_guard().is_err() {
             return;
         }
+        let n = ids.len();
         let me = self.clone();
         let go = move || {
             let Some(app) = me.app() else { return };
@@ -1398,7 +1452,6 @@ impl DocumentsPane {
             });
         };
         if confirm {
-            let n = targets.len();
             crate::ui::confirm(
                 &app.window.clone(),
                 &format!("Delete {n} document{}?", if n == 1 { "" } else { "s" }),
