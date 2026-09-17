@@ -18,6 +18,7 @@ mod focus;
 mod keybinds;
 mod mongo;
 mod notify;
+mod query_complete;
 mod rt;
 mod secrets;
 mod style;

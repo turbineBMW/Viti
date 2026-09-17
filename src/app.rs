@@ -170,8 +170,24 @@ impl App {
         {
             let a = app.clone();
             app.tab_view.connect_close_page(move |_, page| {
-                a.tabs.borrow_mut().retain(|t| t.page != *page);
-                if a.tabs.borrow().is_empty() {
+                let mut tabs = a.tabs.borrow_mut();
+                for t in tabs.iter().filter(|t| t.page == *page) {
+                    t.docs.query_bar.teardown();
+                }
+                tabs.retain(|t| t.page != *page);
+                drop(tabs);
+                let closed: Vec<Rc<PerformancePane>> = a
+                    .perf_tabs
+                    .borrow()
+                    .iter()
+                    .filter(|p| p.page.borrow().as_ref() == Some(page))
+                    .cloned()
+                    .collect();
+                for p in closed {
+                    p.stop();
+                    a.perf_tabs.borrow_mut().retain(|q| !Rc::ptr_eq(q, &p));
+                }
+                if a.tabs.borrow().is_empty() && a.perf_tabs.borrow().is_empty() {
                     a.content_stack.set_visible_child_name("welcome");
                 }
                 glib::Propagation::Proceed

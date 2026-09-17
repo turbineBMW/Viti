@@ -49,6 +49,8 @@ src/
                  IndexSuggest), prompt builder with the schema summary, tokio::process run (stdin prompt,
                  120 s timeout, kill on drop), claude JSON result extraction, brace-balanced JSON scan,
                  parse_response -> Query / pipeline text / explanation / index suggestions; tested
+  query_complete.rs  query bar completions: merge_fields(docs) -> dotted paths + types; complete(text, caret,
+                 fields, Kind) -> field / operator / constructor (`ObjectId("…")`) replacements; apply(); tested
   accent.rs      GSettings accent fallback for non-GNOME portals (copied from Rustle)
   notify.rs      fdo D-Bus desktop notifications (copied from Bubo)
   events.rs      Event bus from tokio to the GTK thread
@@ -108,10 +110,12 @@ src/
     bulk.rs      bulk update (count + before/after preview) and bulk delete dialogs
     my_queries.rs  favourites + saved pipelines across namespaces (Ctrl+Shift+Y); App::run_saved_query /
                  run_saved_pipeline / toggle_favourite
-    query_bar.rs the single toolbar row (filter, history, options toggle, Find/Stop)
+    query_bar.rs the single toolbar row (filter, history, options toggle, Find/Stop) + completers on the entries
                  + options revealer + history popover; the pane adds its view switcher,
                  pager and ⋮ menu to `row`; emits Query
     editor_pane.rs  VTE: external editor jobs (temp EJSON file) and mongosh
+    completer.rs completion popover on an Entry (fields from the pages seen so far, `$ops`, constructors):
+                 Tab accepts, Up/Down move, Enter accepts only after moving, Esc dismisses, Ctrl+Space reopens
     palette.rs   the `:` entry with Tab completion
     help.rs      `?` overlay
     settings.rs  Ctrl+, preferences incl. keybinding capture

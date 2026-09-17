@@ -109,6 +109,9 @@ tabbar tab:selected:active, tabbar tabbox.single-tab tab:selected:active {
 .viti-table cell { padding: 2px 8px; }
 .viti-terminal { padding: 4px; }
 .viti-mono { font-family: monospace; }
+.viti-complete > contents { padding: 0; }
+.viti-complete-list { background: transparent; }
+.viti-complete-list > row { padding: 4px 10px; min-width: 260px; }
 .viti-dim { color: alpha(currentColor, 0.6); }
 .viti-count { font-size: 0.9em; color: alpha(currentColor, 0.6); }
 /* Aggregations: stage cards and their previews. */

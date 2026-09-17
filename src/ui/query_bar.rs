@@ -5,6 +5,8 @@
 //! `row` is the pane's single toolbar line: the documents pane prepends its view
 //! switcher and appends its pager and menu, so there is only ever one row.
 use crate::config::{Query, SavedQuery};
+use crate::query_complete::{Field, Kind};
+use crate::ui::completer::Completer;
 use adw::prelude::*;
 use gtk4 as gtk;
 use std::cell::RefCell;
@@ -38,6 +40,8 @@ pub struct QueryBar {
     /// (id) -> toggle favourite / delete; the pane refreshes the popover.
     on_history_star: RefCell<Option<Rc<dyn Fn(uuid::Uuid)>>>,
     on_history_delete: RefCell<Option<Rc<dyn Fn(uuid::Uuid)>>>,
+    /// Field / operator / constructor popovers on the text entries.
+    completers: Vec<Rc<Completer>>,
 }
 
 fn mono_entry(placeholder: &str) -> gtk::Entry {
@@ -188,6 +192,12 @@ impl QueryBar {
         root.append(&options);
         root.append(&error);
 
+        let completers = vec![
+            Completer::attach(&filter, Kind::Filter),
+            Completer::attach(&project, Kind::Fields),
+            Completer::attach(&sort, Kind::Fields),
+            Completer::attach(&hint, Kind::Fields),
+        ];
         let bar = Rc::new(Self {
             root,
             row,
@@ -212,6 +222,7 @@ impl QueryBar {
             on_history_pick: RefCell::new(None),
             on_history_star: RefCell::new(None),
             on_history_delete: RefCell::new(None),
+            completers,
         });
         for entry in [
             &bar.filter,
@@ -251,6 +262,20 @@ impl QueryBar {
             });
         });
         bar
+    }
+
+    /// The fields the completion popovers offer (the documents seen so far).
+    pub fn set_fields(&self, fields: Rc<Vec<Field>>) {
+        for c in &self.completers {
+            c.set_fields(fields.clone());
+        }
+    }
+
+    /// Unparent the popovers before the tab is dropped.
+    pub fn teardown(&self) {
+        for c in &self.completers {
+            c.detach();
+        }
     }
 
     /// Clear the filter and every option, then re-run.

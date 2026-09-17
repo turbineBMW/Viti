@@ -3,6 +3,7 @@ pub mod aggregation;
 pub mod ai;
 pub mod bulk;
 pub mod collection;
+pub mod completer;
 pub mod connections;
 pub mod documents;
 pub mod editor_pane;

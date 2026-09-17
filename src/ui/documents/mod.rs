@@ -47,6 +47,8 @@ pub struct DocumentsPane {
     pub ns: Namespace,
     app: Weak<App>,
     pub docs: RefCell<Vec<Document>>,
+    /// Every field path seen on any page so far, for the query bar's completions.
+    fields: RefCell<Vec<crate::query_complete::Field>>,
     pub marked: RefCell<BTreeSet<usize>>,
     pub view: Cell<DocView>,
     pub page: Cell<u64>,
@@ -255,6 +257,7 @@ impl DocumentsPane {
             ns,
             app: Rc::downgrade(app),
             docs: RefCell::new(Vec::new()),
+            fields: RefCell::new(Vec::new()),
             marked: RefCell::new(BTreeSet::new()),
             view: Cell::new(settings.default_view),
             page: Cell::new(0),
@@ -886,6 +889,14 @@ impl DocumentsPane {
         self.marked.borrow_mut().clear();
         self.detach_views();
         *self.columns.borrow_mut() = columns;
+        {
+            let mut fields = self.fields.borrow_mut();
+            let before = fields.len();
+            crate::query_complete::merge_fields(&mut fields, &docs);
+            if fields.len() != before {
+                self.query_bar.set_fields(Rc::new(fields.clone()));
+            }
+        }
         let n = docs.len();
         let old = self.docs.replace(docs);
         // Freeing large BSON trees can itself stall GTK.
