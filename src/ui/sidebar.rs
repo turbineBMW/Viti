@@ -1053,6 +1053,7 @@ impl Sidebar {
             Node::Conn(id) => {
                 if app.conn(*id).is_some() {
                     menu.append(Some("New database…"), Some("sidebar.new-db"));
+                    menu.append(Some("Performance"), Some("sidebar.performance"));
                     menu.append(Some("Refresh"), Some("sidebar.refresh"));
                     menu.append(Some("Disconnect"), Some("sidebar.disconnect"));
                 } else {
@@ -1092,6 +1093,14 @@ impl Sidebar {
             let app = app.clone();
             let n = node.clone();
             add("disconnect", Box::new(move || app.disconnect(n.conn())));
+        }
+        {
+            let app = app.clone();
+            let n = node.clone();
+            add(
+                "performance",
+                Box::new(move || app.open_performance(n.conn())),
+            );
         }
         {
             let app = app.clone();

@@ -45,6 +45,10 @@ src/
   config.rs      ~/.config/viti/{config,connections,queries,pipelines,keybindings}.json; #[serde(default)], atomic writes
   secrets.rs     passwords: secret-service keyring, secrets.json (0600) fallback
   style.rs       BUILTIN css (APPLICATION priority) + user style.css (USER priority, hot-reloaded)
+  ai.rs          AI backends (claude -p / codex exec / custom argv): Task (Query, Pipeline, ExplainPlan,
+                 IndexSuggest), prompt builder with the schema summary, tokio::process run (stdin prompt,
+                 120 s timeout, kill on drop), claude JSON result extraction, brace-balanced JSON scan,
+                 parse_response -> Query / pipeline text / explanation / index suggestions; tested
   accent.rs      GSettings accent fallback for non-GNOME portals (copied from Rustle)
   notify.rs      fdo D-Bus desktop notifications (copied from Bubo)
   events.rs      Event bus from tokio to the GTK thread
@@ -70,8 +74,16 @@ src/
     import.rs    JSON (array / NDJSON / single doc) and CSV (FieldType per column guessed from a preview, dotted
                  headers -> nested, ignore empty, stop on error); run() inserts in batches -> Report; tested
     validation.rs  fetch/set the validator via listCollections / collMod; json_schema(Schema) -> $jsonSchema; tested
+    perf.rs      Performance model: serverStatus -> Snapshot, Rates between two, $currentOp -> CurrentOp (own
+                 polls / heartbeats filtered), top -> hottest collections; tested
   ui/
     mod.rs       json_view (sourceview), confirm dialogs, helpers
+    ai.rs        AI entry points: `Ctrl+I` / `:ai` / the AI buttons -> request dialog -> context (Schema page's
+                 analysis or a fresh sample, indexes, explain output) -> backend as a cancellable long op ->
+                 query bar filled / pipeline replaced / explanation card / suggestions dialog (Create… prefills)
+    performance.rs  PerformancePane: one tab per connection (`:perf`, Ctrl+Shift+P, sidebar menu); 1 Hz
+                 serverStatus + $currentOp + top; cairo line charts, hottest collections, slowest ops with
+                 `o` details and `Ctrl+D` killOp, `space` pause
     window.rs    chrome: ToastOverlay > Banner > OverlaySplitView(sidebar | TabView) > Paned(editor pane) > cmdline
     sidebar.rs   one Section per connection (header + own scrolled TreeListModel of Db/Coll); only the active one expands; children loaded lazily into ListStores
     connections.rs  profile editor (General/Auth/TLS/SSH/Advanced pages two-way synced with the
@@ -142,4 +154,5 @@ tunnel + TLS, profile import/export, create/drop/rename databases, collections a
 views, Indexes tab, My Queries, bulk update/delete) and phase 3 (Aggregations page with
 stage cards / text mode / previews / focus mode / saved pipelines / create view /
 external editor, export to language, Explain page) and phase 4 (import JSON/CSV, export
-JSON/CSV, Schema page, Validation page). Next: performance + mongosh + AI (5); polish (6).
+JSON/CSV, Schema page, Validation page) and phase 5 (Performance page, embedded mongosh, AI
+query/pipeline/explain/index generation via `ai.rs`). Next: polish (6).

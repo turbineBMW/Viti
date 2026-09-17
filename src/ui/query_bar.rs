@@ -28,6 +28,8 @@ pub struct QueryBar {
     pub stop: gtk::Button,
     spinner: gtk::Spinner,
     pub history_btn: gtk::MenuButton,
+    /// "Generate with AI": the pane wires it, the bar only shows it.
+    pub ai_btn: gtk::Button,
     history_popover: gtk::Popover,
     history_list: gtk::ListBox,
     pub error: gtk::Label,
@@ -96,10 +98,17 @@ impl QueryBar {
 
         // One line: [ filter ] [history] [options] [spinner] [Find/Stop], with the
         // pane's own controls added around it.
+        let ai_btn = gtk::Button::builder()
+            .label("AI")
+            .tooltip_text("Generate a query from a description (Ctrl+I)")
+            .focus_on_click(false)
+            .css_classes(["flat"])
+            .build();
         let query_group = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         query_group.add_css_class("linked");
         query_group.append(&filter);
         query_group.append(&history_btn);
+        query_group.append(&ai_btn);
         query_group.append(&options_btn);
 
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -195,6 +204,7 @@ impl QueryBar {
             stop,
             spinner,
             history_btn,
+            ai_btn,
             history_popover,
             history_list,
             error,

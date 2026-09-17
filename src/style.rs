@@ -126,6 +126,11 @@ tabbar tab:selected:active, tabbar tabbox.single-tab tab:selected:active {
 /* Explain: stat tiles and the plan tree. */
 .viti-tile { background: var(--card-bg-color); color: var(--card-fg-color); border-radius: 8px; padding: 6px 12px; border: 1px solid alpha(currentColor, 0.08); }
 .viti-tile .value { font-size: 1.25em; font-weight: 700; }
+.viti-perf-card { background: var(--card-bg-color); color: var(--card-fg-color); border-radius: 8px; padding: 8px 12px; border: 1px solid alpha(currentColor, 0.08); }
+.viti-perf-hot > row { padding: 2px 0; }
+.viti-perf-bar trough { min-height: 4px; }
+.viti-perf-bar block { min-height: 4px; }
+.viti-ai-card { background: var(--card-bg-color); color: var(--card-fg-color); border-radius: 8px; padding: 8px 12px; border: 1px solid alpha(var(--accent-color), 0.4); }
 .viti-collscan { color: var(--error-color); }
 .viti-explain.viti-focused { outline: none; }
 .viti-explain.viti-focused listview > row:selected { outline: 1px solid var(--accent-color); outline-offset: -2px; border-radius: 6px; }

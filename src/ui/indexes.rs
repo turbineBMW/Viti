@@ -179,6 +179,11 @@ impl IndexesPane {
             .focus_on_click(false)
             .css_classes(["destructive-action"])
             .build();
+        let ai_btn = gtk::Button::builder()
+            .label("Suggest with AI")
+            .tooltip_text("Ask the AI backend which indexes would help (Ctrl+I)")
+            .focus_on_click(false)
+            .build();
         let bar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         bar.set_margin_start(8);
         bar.set_margin_end(8);
@@ -189,6 +194,7 @@ impl IndexesPane {
         bar.append(&refresh);
         bar.append(&hide);
         bar.append(&drop);
+        bar.append(&ai_btn);
         bar.append(&add);
 
         let scroller = gtk::ScrolledWindow::builder()
@@ -222,6 +228,18 @@ impl IndexesPane {
         {
             let p = pane.clone();
             add.connect_clicked(move |_| p.add());
+        }
+        {
+            let p = pane.clone();
+            ai_btn.connect_clicked(move |_| {
+                if let Some(app) = p.app() {
+                    crate::ui::ai::ask(
+                        &app,
+                        Some(crate::ai::Task::IndexSuggest),
+                        Some(String::new()),
+                    );
+                }
+            });
         }
         {
             let p = pane.clone();
@@ -487,6 +505,12 @@ impl IndexesPane {
 
     /// `A`: the create-index dialog.
     pub fn add(&self) {
+        self.add_prefilled(None);
+    }
+
+    /// The create dialog, optionally filled in (keys, options) — e.g. from an
+    /// AI suggestion.
+    pub fn add_prefilled(&self, initial: Option<(Document, Document)>) {
         let Some(app) = self.app() else { return };
         let Some(me) = self.me() else { return };
         let dialog = adw::Dialog::builder()
@@ -553,7 +577,30 @@ impl IndexesPane {
                 rows.borrow_mut().push((row, dd));
             })
         };
-        add_row("", 0);
+        match initial.as_ref().map(|(k, _)| k).filter(|k| !k.is_empty()) {
+            Some(keys) => {
+                for (field, value) in keys {
+                    let (name, kind) = match value {
+                        Bson::Int32(-1) | Bson::Int64(-1) => (field.clone(), 1),
+                        Bson::Double(v) if *v < 0.0 => (field.clone(), 1),
+                        Bson::String(s) => (
+                            field.clone(),
+                            KEY_TYPES.iter().position(|(_, k)| k == s).unwrap_or(0) as u32,
+                        ),
+                        _ if field.ends_with("$**") => (
+                            field
+                                .trim_end_matches("$**")
+                                .trim_end_matches('.')
+                                .to_string(),
+                            6,
+                        ),
+                        _ => (field.clone(), 0),
+                    };
+                    add_row(&name, kind);
+                }
+            }
+            None => add_row("", 0),
+        }
         {
             let add_row = add_row.clone();
             add_field.connect_clicked(move |_| add_row("", 0));
@@ -596,6 +643,29 @@ impl IndexesPane {
         opts.add(&hidden);
         opts.add(&ttl);
         page.add(&opts);
+        if let Some((_, o)) = &initial {
+            if let Ok(n) = o.get_str("name") {
+                name.set_text(n);
+            }
+            unique.set_active(o.get_bool("unique").unwrap_or(false));
+            sparse.set_active(o.get_bool("sparse").unwrap_or(false));
+            hidden.set_active(o.get_bool("hidden").unwrap_or(false));
+            if let Some(t) = o
+                .get("expireAfterSeconds")
+                .and_then(crate::mongo::perf::as_f64)
+            {
+                ttl.set_value(t.max(0.0));
+            }
+            for (key, row) in [
+                ("partialFilterExpression", &partial),
+                ("collation", &collation),
+                ("wildcardProjection", &projection),
+            ] {
+                if let Ok(d) = o.get_document(key) {
+                    row.set_text(&ejson::compact(d, ejson::Mode::Relaxed));
+                }
+            }
+        }
 
         let error = gtk::Label::builder()
             .xalign(0.0)

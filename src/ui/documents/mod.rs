@@ -128,6 +128,7 @@ impl DocumentsPane {
         let act_export_lang = gio::SimpleAction::new("export-language", None);
         let act_export = gio::SimpleAction::new("export", None);
         let act_import = gio::SimpleAction::new("import", None);
+        let act_ai = gio::SimpleAction::new("ai", None);
         let expand_action =
             gio::SimpleAction::new_stateful("expand-all", None, &false.to_variant());
         let act_size = gio::SimpleAction::new_stateful(
@@ -146,6 +147,7 @@ impl DocumentsPane {
             &act_export_lang,
             &act_export,
             &act_import,
+            &act_ai,
         ] {
             actions.add_action(a);
         }
@@ -189,6 +191,10 @@ impl DocumentsPane {
         tools.append(
             Some(&tip("Export query to language…", "docs.export-language")),
             Some("docs.export-language"),
+        );
+        tools.append(
+            Some(&tip("Generate query with AI…", "global.ai")),
+            Some("docs.ai"),
         );
         menu.append_section(None, &tools);
         let sizes = gio::Menu::new();
@@ -380,6 +386,17 @@ impl DocumentsPane {
         {
             let p = pane.clone();
             act_export_lang.connect_activate(move |_, _| p.export_language());
+        }
+        {
+            let p = pane.clone();
+            let ask = move || {
+                if let Some(app) = p.app() {
+                    crate::ui::ai::ask(&app, Some(crate::ai::Task::Query), None);
+                }
+            };
+            let ask2 = ask.clone();
+            act_ai.connect_activate(move |_, _| ask());
+            pane.query_bar.ai_btn.connect_clicked(move |_| ask2());
         }
         {
             let p = pane.clone();

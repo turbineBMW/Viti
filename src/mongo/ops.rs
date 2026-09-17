@@ -1602,3 +1602,53 @@ mod live {
         );
     }
 }
+
+// ----- performance page --------------------------------------------------------
+
+/// `serverStatus` trimmed to the sections the Performance page reads.
+pub async fn server_status(client: &Client) -> Result<Document> {
+    client
+        .database("admin")
+        .run_command(doc! {
+            "serverStatus": 1,
+            "wiredTiger": 0, "tcmalloc": 0, "locks": 0,
+            "logicalSessionRecordCache": 0, "transactions": 0, "electionMetrics": 0,
+            "repl": 0, "security": 0, "trafficRecording": 0, "twoPhaseCommitCoordinator": 0,
+        })
+        .await
+        .context("serverStatus failed")
+}
+
+/// Every active operation on the server (needs the `inprog` privilege on
+/// non-local users; own operations are always visible).
+pub async fn current_ops(client: &Client) -> Result<Vec<Document>> {
+    client
+        .database("admin")
+        .aggregate(vec![
+            doc! { "$currentOp": { "allUsers": true, "idleConnections": false } },
+            doc! { "$match": { "active": true } },
+        ])
+        .await
+        .context("$currentOp failed")?
+        .try_collect()
+        .await
+        .context("$currentOp failed")
+}
+
+/// `top`: per-namespace operation totals (mongod only; mongos refuses it).
+pub async fn top(client: &Client) -> Result<Document> {
+    client
+        .database("admin")
+        .run_command(doc! { "top": 1 })
+        .await
+        .context("top failed")
+}
+
+pub async fn kill_op(client: &Client, opid: Bson) -> Result<()> {
+    client
+        .database("admin")
+        .run_command(doc! { "killOp": 1, "op": opid })
+        .await
+        .context("killOp failed")?;
+    Ok(())
+}

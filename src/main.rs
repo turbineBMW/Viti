@@ -7,6 +7,7 @@
 #![allow(dead_code)]
 
 mod accent;
+mod ai;
 mod app;
 mod commands;
 mod config;

@@ -307,6 +307,23 @@ pub fn show(app: &Rc<App>) {
             app.schedule_save();
         });
     }
+    let custom_json = adw::SwitchRow::builder()
+        .title("Custom command prints claude-style JSON")
+        .subtitle("The reply is read from the `result` field instead of the whole output")
+        .active(cfg.ai.custom_json_result)
+        .visible(cfg.ai.backend == "custom")
+        .build();
+    {
+        let app = app.clone();
+        custom_json.connect_active_notify(move |r| {
+            app.config.borrow_mut().settings.ai.custom_json_result = r.is_active();
+            app.schedule_save();
+        });
+    }
+    custom
+        .bind_property("visible", &custom_json, "visible")
+        .sync_create()
+        .build();
     let samples = adw::SwitchRow::builder()
         .title("Send sample field values")
         .subtitle("Otherwise only field names and types are sent")
@@ -321,6 +338,7 @@ pub fn show(app: &Rc<App>) {
     }
     ai.add(&be);
     ai.add(&custom);
+    ai.add(&custom_json);
     ai.add(&samples);
     editor.add(&ai);
     dialog.add(&editor);

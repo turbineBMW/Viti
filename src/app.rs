@@ -11,6 +11,7 @@ use crate::notify::{Notice, Notifier};
 use crate::ui::collection::CollectionTab;
 use crate::ui::editor_pane::{EditorJob, EditorPane, JobKind};
 use crate::ui::palette::Palette;
+use crate::ui::performance::PerformancePane;
 use crate::ui::sidebar::{Node, Sidebar};
 use adw::prelude::*;
 use gtk4 as gtk;
@@ -49,6 +50,8 @@ pub struct App {
     pub config: RefCell<Config>,
     pub conns: RefCell<Vec<Rc<Conn>>>,
     pub tabs: RefCell<Vec<Rc<CollectionTab>>>,
+    /// Performance pages, one per connection, in the same TabView.
+    pub perf_tabs: RefCell<Vec<Rc<PerformancePane>>>,
     pub keymap: RefCell<Keymap>,
     pub events: events::Sender,
     pub notifier: Option<Rc<Notifier>>,
@@ -97,6 +100,7 @@ impl App {
             config: RefCell::new(cfg),
             conns: RefCell::new(Vec::new()),
             tabs: RefCell::new(Vec::new()),
+            perf_tabs: RefCell::new(Vec::new()),
             keymap: RefCell::new(Keymap::new()),
             events: tx,
             notifier,
@@ -487,9 +491,16 @@ impl App {
             t.page
                 .set_tooltip(&format!("{}.{}", conn_name(t.conn), t.ns));
         }
-        let title = match self.current_tab() {
-            Some(t) => format!("{}.{} — Viti{ro}", conn_name(t.conn), t.ns),
-            None => format!("Viti{ro}"),
+        for p in self.perf_tabs.borrow().iter() {
+            if let Some(page) = p.page.borrow().as_ref() {
+                page.set_title(&format!("Performance · {}", conn_name(p.conn)));
+                page.set_tooltip(&format!("Performance of {}", conn_name(p.conn)));
+            }
+        }
+        let title = match (self.current_tab(), self.current_perf()) {
+            (Some(t), _) => format!("{}.{} — Viti{ro}", conn_name(t.conn), t.ns),
+            (None, Some(p)) => format!("Performance · {} — Viti{ro}", conn_name(p.conn)),
+            _ => format!("Viti{ro}"),
         };
         self.window.set_title(Some(&title));
     }
@@ -658,9 +669,12 @@ impl App {
                                 for id in ids.split(',').filter(|s| !s.trim().is_empty()) {
                                     a.run_action(id.trim());
                                 }
-                                for line in cmds.split(';').filter(|s| !s.trim().is_empty()) {
-                                    a.run_command(line.trim());
-                                }
+                                let lines: Vec<String> = cmds
+                                    .split(';')
+                                    .map(|s| s.trim().to_string())
+                                    .filter(|s| !s.is_empty())
+                                    .collect();
+                                a.run_debug_commands(lines);
                             },
                         );
                     }
@@ -718,6 +732,23 @@ impl App {
                     Err(e) => self.toast(&e),
                 }
             }
+        }
+    }
+
+    /// `VITI_DEBUG_COMMAND` lines in order; `wait <secs>` delays the rest so
+    /// an async page (explain, schema) can finish before the next line.
+    fn run_debug_commands(self: &Rc<Self>, mut lines: Vec<String>) {
+        while !lines.is_empty() {
+            let line = lines.remove(0);
+            if let Some(secs) = line.strip_prefix("wait ") {
+                let secs: f64 = secs.trim().parse().unwrap_or(1.0);
+                let a = self.clone();
+                glib::timeout_add_local_once(std::time::Duration::from_secs_f64(secs), move || {
+                    a.run_debug_commands(lines)
+                });
+                return;
+            }
+            self.run_command(&line);
         }
     }
 
@@ -812,6 +843,53 @@ impl App {
     pub fn current_tab(&self) -> Option<Rc<CollectionTab>> {
         let page = self.tab_view.selected_page()?;
         self.tabs.borrow().iter().find(|t| t.page == page).cloned()
+    }
+
+    /// The selected tab, if it is a Performance page.
+    pub fn current_perf(&self) -> Option<Rc<PerformancePane>> {
+        let page = self.tab_view.selected_page()?;
+        self.perf_tabs
+            .borrow()
+            .iter()
+            .find(|p| p.page.borrow().as_ref() == Some(&page))
+            .cloned()
+    }
+
+    /// Open (or switch to) the connection's Performance page.
+    pub fn open_performance(self: &Rc<Self>, conn: ConnectionId) {
+        if self.conn(conn).is_none() {
+            self.toast("Connect first");
+            return;
+        }
+        let existing = self
+            .perf_tabs
+            .borrow()
+            .iter()
+            .find(|p| p.conn == conn)
+            .cloned();
+        let pane = match existing {
+            Some(p) => p,
+            None => {
+                let pane = PerformancePane::new(self, conn);
+                let page = self.tab_view.append(&pane.root);
+                page.set_icon(Some(&gio::ThemedIcon::new(
+                    "utilities-system-monitor-symbolic",
+                )));
+                *pane.page.borrow_mut() = Some(page);
+                self.focus.register(&pane.root, Scope::Performance);
+                self.perf_tabs.borrow_mut().push(pane.clone());
+                pane.start();
+                pane
+            }
+        };
+        self.content_stack.set_visible_child_name("tabs");
+        if let Some(page) = pane.page.borrow().as_ref() {
+            self.tab_view.set_selected_page(page);
+        }
+        self.current_conn.set(Some(conn));
+        self.sync_page_picker();
+        self.update_title();
+        pane.root.grab_focus();
     }
 
     fn close_current_tab(&self) {
@@ -1247,6 +1325,11 @@ impl App {
                             t.schema.move_cursor(delta);
                         }
                     }
+                    Scope::Performance => {
+                        if let Some(p) = self.current_perf() {
+                            p.move_cursor(delta);
+                        }
+                    }
                     _ => return proceed,
                 }
             }
@@ -1330,6 +1413,15 @@ impl App {
                                 t.schema.top();
                             } else {
                                 t.schema.bottom();
+                            }
+                        }
+                    }
+                    Scope::Performance => {
+                        if let Some(p) = self.current_perf() {
+                            if top {
+                                p.top();
+                            } else {
+                                p.bottom();
                             }
                         }
                     }
@@ -1481,6 +1573,23 @@ impl App {
                     "idx.hide" => t.indexes.toggle_hidden(),
                     "idx.peek" | "idx.peek-enter" => t.indexes.peek(),
                     "idx.refresh" => t.indexes.load(),
+                    _ => return proceed,
+                }
+            }
+            "global.ai" => crate::ui::ai::ask(self, None, None),
+            "global.performance" => match self.current_conn.get() {
+                Some(c) => self.open_performance(c),
+                None => self.toast("Connect first"),
+            },
+            _ if id.starts_with("perf.") => {
+                let Some(p) = self.current_perf() else {
+                    return proceed;
+                };
+                match id {
+                    "perf.pause" => p.toggle_pause(),
+                    "perf.refresh" => p.tick(),
+                    "perf.peek" | "perf.peek-enter" => p.peek(),
+                    "perf.kill" => p.kill_selected(),
                     _ => return proceed,
                 }
             }
@@ -1812,7 +1921,11 @@ impl App {
                 }
                 None => self.toast("Open a collection first"),
             },
-            "ai" => self.toast("AI generation arrives in phase 5"),
+            "ai" => crate::ui::ai::ask(self, None, Some(inv.rest.clone())),
+            "perf" => match self.current_conn.get() {
+                Some(c) => self.open_performance(c),
+                None => self.toast("Not connected"),
+            },
             "shell" => self.toggle_shell(),
             "settings" => crate::ui::settings::show(self),
             "help" => crate::ui::help::show(self),
