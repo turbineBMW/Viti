@@ -1,84 +1,86 @@
 # Viti
 
-MongoDB Compass, the GTK way, with vi keys.
+Viti is a native GTK MongoDB client for Linux, built in Rust. It combines the
+workflows of MongoDB Compass with a fast, keyboard-first interface.
 
-A native GTK 4 / libadwaita MongoDB client in Rust. It aims at everything Compass
-does (documents, query bar, aggregation builder, schema, explain, indexes, validation,
-import/export, bulk update/delete, performance, embedded shell) with vi-mongo's
-keyboard model, a `:` command line, documents edited in **your** editor (nvim by
-default) inside an embedded terminal, and Compass's AI features replaced by shelling
-out to `claude -p` or `codex`.
+![Viti connection editor](docs/viti.png)
 
-Status: phases 1–4 — connections (advanced form with auth mechanisms, TLS files, SSH
-tunnel, read preference…; import/export incl. Compass exports), sidebar, documents
-(list / JSON / table), query bar with history and favourites (My Queries),
-insert/edit/duplicate/delete, external editing, bulk update with preview and bulk delete,
-create/drop/rename databases, collections and views, an Indexes tab, an Aggregations
-page (stage cards with live previews, text mode, focus mode, saved pipelines, create
-view, edit the pipeline in your editor), an Explain Plan page (query or pipeline; stat
-tiles, plan tree, raw JSON), export of queries and pipelines to eight languages,
-import of JSON / CSV files (typed columns, nested dotted headers, error report) and
-export of the collection, the query or the aggregation results to Extended JSON (three
-flavours, array or one per line) or CSV (chosen fields, formula escaping), a Schema page
-(random sample, type shares, value histograms, click a bar to filter) and a Validation
-page (rules editor, action / level, passing and failing samples, generate a `$jsonSchema`
-from the sample), vi keys, `:` palette, settings. See `CLAUDE.md` for the roadmap.
+> Viti is under active development. Review destructive operations carefully
+> and keep backups of important data.
 
-## Build
+## Highlights
 
+- Browse, filter, edit, import, and export documents.
+- Build aggregation pipelines with live previews.
+- Inspect schemas, indexes, validation rules, explain plans, and server
+  performance.
+- Work in list, JSON, and table views with pagination for large collections.
+- Edit with the built-in editor or your preferred terminal editor.
+- Use vi-style navigation, configurable shortcuts, and a `:` command palette.
+- Connect with TLS, SSH tunnels, authentication mechanisms, and imported
+  MongoDB Compass profiles.
+- Optionally draft queries and pipelines through local `claude` or `codex`
+  commands.
+
+## Build and install
+
+Viti requires Rust and these Linux libraries:
+
+- GTK 4.18 or newer
+- libadwaita 1.7 or newer
+- GtkSourceView 5
+- VTE for GTK 4
+
+Run it from the source tree:
+
+```sh
+cargo run
 ```
-cargo run                       # needs gtk4 ≥ 4.18, libadwaita ≥ 1.7, gtksourceview-5, vte-2.91-gtk4
-sh install.sh                   # user-local install
-viti mongodb://localhost:27017  # connect straight away
+
+Or install the binary, desktop entry, and icons for the current user:
+
+```sh
+./install.sh
 ```
 
-## Keys
+The installer writes to `~/.local` and does not require root access.
 
-Keys act on the pane with the accent outline. They never fire while you are typing
-in an entry, editor or terminal; Escape returns to the pane.
+## Usage
+
+Start Viti and add a connection with `Ctrl+O`:
+
+```sh
+viti
+```
+
+For local development, a URI can be supplied directly:
+
+```sh
+viti mongodb://localhost:27017
+```
+
+Avoid putting passwords in command-line URIs because shell history and process
+lists may expose them. Viti stores connection profiles without passwords and
+uses the system keyring by default for secrets.
+
+Useful shortcuts:
 
 | Key | Action |
-|---|---|
-| `j` `k` `h` `l` `g` `G` | move / collapse / expand / top / bottom |
-| `Tab` `Shift+Tab` `Ctrl+L` `Ctrl+H` | cycle panes |
-| `/` | filter (sidebar) or query bar (documents) |
-| `:` | command line (`:db`, `:coll`, `:find {…}`, `:view json`, `:set readonly on`, `:42`, `:mkcoll`, `:drop`, `:rename`, `:update {…}`, `:delete`, `:queries`, `:agg`, `:schema`, `:validation`, `:explain`, `:export [json|csv|language]`, `:import [path]`, `:conn new`, `:q`) |
-| `?` | all keybindings |
-| `Ctrl+O` | connections |
-| `v` | list → JSON → table |
-| `o` / `Enter`, `O` | open document, full page |
-| `e`, `E` | edit inline, edit in external editor |
-| `A`, `D`, `Ctrl+D` | add, duplicate, delete |
-| `V`, `c`, `C` | multi-select, copy value, copy document |
-| `]` `[` `n` `b` | next/prev document, next/prev page |
-| `Alt+G` | go to page: first, last, or a page's document range |
-| `s` `S` `H` `r` | sort, sort by column, hide column, reset columns |
-| `u`, `Ctrl+Shift+D` | bulk update / bulk delete everything the filter matches |
-| `X`, `I` | export the collection / query (or the aggregation results) to JSON / CSV, import JSON / CSV |
-| `Alt+O`, `Ctrl+Y`, `Ctrl+S`, `Ctrl+Shift+Y` | query options, history, save favourite, My Queries |
-| sidebar: `A`, `Ctrl+D`, `R`, `i`, `Shift+Enter` | new collection (or database), drop, rename, indexes, open in new tab |
-| indexes: `A`, `Ctrl+D`, `H`, `o` | create, drop, hide/unhide, details |
-| aggregations: `a` `e` `Ctrl+D` `J` `K` `t` | add / edit / remove / move / enable-disable the current stage |
-| aggregations: `R` `Esc` `m` `f` `T` | run, cancel, text mode, focus mode, auto-preview on/off |
-| aggregations: `Ctrl+J` `o` `n` `b` | vi keys on the results, open result, next/prev results page |
-| aggregations: `Ctrl+E` `Ctrl+S` `Ctrl+Y` `V` `C` | pipeline in your editor, save, open saved, create view, clear |
-| `P`, `Ctrl+Shift+X` | explain the query / pipeline, export it to language (documents and aggregations) |
-| explain: `R` `v` `o` `h` `l` `s` `V` `C` | run, tree/raw, stage details, collapse/expand, query/pipeline source, verbosity, copy |
-| schema: `R` `h` `l` `Enter` `o` `C` | analyse a sample, pick a bar, filter the documents by it, field details, copy a generated `$jsonSchema` |
-| validation: `e` `Ctrl+E` `G` `r` `Ctrl+S` | edit the rules, in your editor, generate from the schema, reload, save (`collMod`) |
-| `Ctrl+`` ` | mongosh |
-| `Ctrl+,` | settings (including rebinding every key) |
+| --- | --- |
+| `Ctrl+O` | Connections |
+| `/` | Filter or focus the query bar |
+| `:` | Command palette |
+| `e` / `E` | Edit inline / with the configured editor |
+| `v` | Cycle document views |
+| `?` | Show all shortcuts |
 
-Bindings live in `~/.config/viti/keybindings.json` and reload on save.
+## Development
 
-Collection pages render only the selected view. Large values and nested structures
-use bounded previews; a notice marks shortened previews. Open a document to see its
-full contents, or copy/edit/export it as usual. Table previews show up to 64 columns.
-Paging fetches one page plus one lookahead document, and collection counts update
-separately and are reused until the query changes or you refresh.
+```sh
+cargo fmt -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+```
 
-## Config
-
-`~/.config/viti/`: `config.json`, `connections.json` (no passwords — those go to the
-keyring, or `secrets.json` with mode 0600), `queries.json`, `pipelines.json`, `keybindings.json`, and
-`style.css` (user CSS, applied live).
+Tests that require a live MongoDB instance are skipped unless `VITI_TEST_URI`
+is set.
