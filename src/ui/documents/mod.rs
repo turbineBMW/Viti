@@ -1341,8 +1341,14 @@ impl DocumentsPane {
         }
     }
 
+    /// `E`: the external editor, but only when settings pick it; with the
+    /// in-app editor chosen this is the same as `e`.
     pub fn edit_external(self: &Rc<Self>) {
         let Some(app) = self.app() else { return };
+        if !app.config.borrow().settings.uses_external_editor() {
+            self.edit_inline();
+            return;
+        }
         let targets = self.targets();
         if targets.is_empty() {
             return;

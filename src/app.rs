@@ -169,6 +169,16 @@ impl App {
         }
         {
             let a = app.clone();
+            editor_pane.set_on_spawn_failed(move |job, err| {
+                if !matches!(job.kind, JobKind::Text { ref purpose } if purpose == "file") {
+                    let _ = std::fs::remove_file(&job.path);
+                }
+                a.blur_to_pane();
+                a.toast_error("open editor", &anyhow::anyhow!(err));
+            });
+        }
+        {
+            let a = app.clone();
             app.tab_view.connect_close_page(move |_, page| {
                 let mut tabs = a.tabs.borrow_mut();
                 for t in tabs.iter().filter(|t| t.page == *page) {
@@ -928,9 +938,7 @@ impl App {
             self.toast("The editor is already open");
             return;
         }
-        let mut argv = settings.editor_argv();
-        argv.push(path.to_string_lossy().into_owned());
-        self.editor_pane.reopen(
+        if let Err(e) = self.editor_pane.reopen(
             &settings,
             EditorJob {
                 id: uuid::Uuid::new_v4(),
@@ -941,7 +949,9 @@ impl App {
                 original_text: String::new(),
             },
             title,
-        );
+        ) {
+            self.toast_error("open editor", &e);
+        }
     }
 
     fn on_editor_exited(self: &Rc<Self>, job: EditorJob, status: i32) {
@@ -1163,8 +1173,12 @@ impl App {
         toast.connect_button_clicked(move |t| {
             t.dismiss();
             let settings = a.config.borrow().settings.clone();
-            a.editor_pane
-                .reopen(&settings, job2.clone(), "fix and save again");
+            if let Err(e) = a
+                .editor_pane
+                .reopen(&settings, job2.clone(), "fix and save again")
+            {
+                a.toast_error("open editor", &e);
+            }
         });
         let path = job.path.clone();
         toast.connect_dismissed(move |_| {
