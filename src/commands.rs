@@ -146,7 +146,13 @@ pub const COMMANDS: &[Command] = &[
         name: "ai",
         aliases: &[],
         args: ArgSpec::Text,
-        help: "Generate a query from a description",
+        help: "Ask AI: a query (or pipeline / plan explanation / indexes, per page) from a description",
+    },
+    Command {
+        name: "perf",
+        aliases: &["performance", "stats"],
+        args: ArgSpec::None,
+        help: "Open the Performance page of the current connection",
     },
     Command {
         name: "set",

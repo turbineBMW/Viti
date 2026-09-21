@@ -25,7 +25,9 @@ Dev hooks: `viti mongodb://localhost:27017` saves a profile and connects on laun
 connected (one tab each); `VITI_DEBUG_PIPELINE='[{ $match: {} }]'` loads and runs a pipeline on the first tab's
 Aggregations page, `VITI_DEBUG_ACTION=id,id` runs action ids and
 `VITI_DEBUG_COMMAND=index;update {…}` runs `:` lines (`schema`, `validation`,
-`export csv`, `import /path.csv` open those pages / dialogs), in that order, 1.5 s after that;
+`export csv`, `import /path.csv` open those pages / dialogs; `perf` the Performance page;
+`ai <text>` asks the AI backend for the current page; `wait 3` pauses before the next line),
+in that order, 1.5 s after that (`VITI_DEBUG_DELAY=ms` changes the wait);
 `VITI_LOG=viti=debug` turns logging up (tracing env-filter syntax).
 `VITI_TEST_URI=mongodb://localhost:27017 cargo test live` runs the server round-trip
 tests in `mongo/ops.rs` and `mongo/export.rs` (export → import → validation; each creates
@@ -45,6 +47,12 @@ src/
   config.rs      ~/.config/viti/{config,connections,queries,pipelines,keybindings}.json; #[serde(default)], atomic writes
   secrets.rs     passwords: secret-service keyring, secrets.json (0600) fallback
   style.rs       BUILTIN css (APPLICATION priority) + user style.css (USER priority, hot-reloaded)
+  ai.rs          AI backends (claude -p / codex exec / custom argv): Task (Query, Pipeline, ExplainPlan,
+                 IndexSuggest), prompt builder with the schema summary, tokio::process run (stdin prompt,
+                 120 s timeout, kill on drop), claude JSON result extraction, brace-balanced JSON scan,
+                 parse_response -> Query / pipeline text / explanation / index suggestions; tested
+  query_complete.rs  query bar completions: merge_fields(docs) -> dotted paths + types; complete(text, caret,
+                 fields, Kind) -> field / operator / constructor (`ObjectId("…")`) replacements; apply(); tested
   accent.rs      GSettings accent fallback for non-GNOME portals (copied from Rustle)
   notify.rs      fdo D-Bus desktop notifications (copied from Bubo)
   events.rs      Event bus from tokio to the GTK thread
@@ -70,8 +78,16 @@ src/
     import.rs    JSON (array / NDJSON / single doc) and CSV (FieldType per column guessed from a preview, dotted
                  headers -> nested, ignore empty, stop on error); run() inserts in batches -> Report; tested
     validation.rs  fetch/set the validator via listCollections / collMod; json_schema(Schema) -> $jsonSchema; tested
+    perf.rs      Performance model: serverStatus -> Snapshot, Rates between two, $currentOp -> CurrentOp (own
+                 polls / heartbeats filtered), top -> hottest collections; tested
   ui/
     mod.rs       json_view (sourceview), confirm dialogs, helpers
+    ai.rs        AI entry points: `Ctrl+I` / `:ai` / the AI buttons -> request dialog -> context (Schema page's
+                 analysis or a fresh sample, indexes, explain output) -> backend as a cancellable long op ->
+                 query bar filled / pipeline replaced / explanation card / suggestions dialog (Create… prefills)
+    performance.rs  PerformancePane: one tab per connection (`:perf`, Ctrl+Shift+P, sidebar menu); 1 Hz
+                 serverStatus + $currentOp + top; cairo line charts, hottest collections, slowest ops with
+                 `o` details and `Ctrl+D` killOp, `space` pause
     window.rs    chrome: ToastOverlay > Banner > OverlaySplitView(sidebar | TabView) > Paned(editor pane) > cmdline
     sidebar.rs   one Section per connection (header + own scrolled TreeListModel of Db/Coll); only the active one expands; children loaded lazily into ListStores
     connections.rs  profile editor (General/Auth/TLS/SSH/Advanced pages two-way synced with the
@@ -96,10 +112,12 @@ src/
     bulk.rs      bulk update (count + before/after preview) and bulk delete dialogs
     my_queries.rs  favourites + saved pipelines across namespaces (Ctrl+Shift+Y); App::run_saved_query /
                  run_saved_pipeline / toggle_favourite
-    query_bar.rs the single toolbar row (filter, history, options toggle, Find/Stop)
+    query_bar.rs the single toolbar row (filter, history, options toggle, Find/Stop) + completers on the entries
                  + options revealer + history popover; the pane adds its view switcher,
                  pager and ⋮ menu to `row`; emits Query
     editor_pane.rs  VTE: external editor jobs (temp EJSON file) and mongosh
+    completer.rs completion popover on an Entry (fields from the pages seen so far, `$ops`, constructors):
+                 Tab accepts, Up/Down move, Enter accepts only after moving, Esc dismisses, Ctrl+Space reopens
     palette.rs   the `:` entry with Tab completion
     help.rs      `?` overlay
     settings.rs  Ctrl+, preferences incl. keybinding capture
@@ -142,4 +160,5 @@ tunnel + TLS, profile import/export, create/drop/rename databases, collections a
 views, Indexes tab, My Queries, bulk update/delete) and phase 3 (Aggregations page with
 stage cards / text mode / previews / focus mode / saved pipelines / create view /
 external editor, export to language, Explain page) and phase 4 (import JSON/CSV, export
-JSON/CSV, Schema page, Validation page). Next: performance + mongosh + AI (5); polish (6).
+JSON/CSV, Schema page, Validation page) and phase 5 (Performance page, embedded mongosh, AI
+query/pipeline/explain/index generation via `ai.rs`). Next: polish (6).

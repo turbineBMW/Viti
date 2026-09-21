@@ -5,6 +5,8 @@
 //! `row` is the pane's single toolbar line: the documents pane prepends its view
 //! switcher and appends its pager and menu, so there is only ever one row.
 use crate::config::{Query, SavedQuery};
+use crate::query_complete::{Field, Kind};
+use crate::ui::completer::Completer;
 use adw::prelude::*;
 use gtk4 as gtk;
 use std::cell::RefCell;
@@ -28,6 +30,8 @@ pub struct QueryBar {
     pub stop: gtk::Button,
     spinner: gtk::Spinner,
     pub history_btn: gtk::MenuButton,
+    /// "Generate with AI": the pane wires it, the bar only shows it.
+    pub ai_btn: gtk::Button,
     history_popover: gtk::Popover,
     history_list: gtk::ListBox,
     pub error: gtk::Label,
@@ -36,6 +40,8 @@ pub struct QueryBar {
     /// (id) -> toggle favourite / delete; the pane refreshes the popover.
     on_history_star: RefCell<Option<Rc<dyn Fn(uuid::Uuid)>>>,
     on_history_delete: RefCell<Option<Rc<dyn Fn(uuid::Uuid)>>>,
+    /// Field / operator / constructor popovers on the text entries.
+    completers: Vec<Rc<Completer>>,
 }
 
 fn mono_entry(placeholder: &str) -> gtk::Entry {
@@ -96,10 +102,17 @@ impl QueryBar {
 
         // One line: [ filter ] [history] [options] [spinner] [Find/Stop], with the
         // pane's own controls added around it.
+        let ai_btn = gtk::Button::builder()
+            .label("AI")
+            .tooltip_text("Generate a query from a description (Ctrl+I)")
+            .focus_on_click(false)
+            .css_classes(["flat"])
+            .build();
         let query_group = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         query_group.add_css_class("linked");
         query_group.append(&filter);
         query_group.append(&history_btn);
+        query_group.append(&ai_btn);
         query_group.append(&options_btn);
 
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -179,6 +192,12 @@ impl QueryBar {
         root.append(&options);
         root.append(&error);
 
+        let completers = vec![
+            Completer::attach(&filter, Kind::Filter),
+            Completer::attach(&project, Kind::Fields),
+            Completer::attach(&sort, Kind::Fields),
+            Completer::attach(&hint, Kind::Fields),
+        ];
         let bar = Rc::new(Self {
             root,
             row,
@@ -195,6 +214,7 @@ impl QueryBar {
             stop,
             spinner,
             history_btn,
+            ai_btn,
             history_popover,
             history_list,
             error,
@@ -202,6 +222,7 @@ impl QueryBar {
             on_history_pick: RefCell::new(None),
             on_history_star: RefCell::new(None),
             on_history_delete: RefCell::new(None),
+            completers,
         });
         for entry in [
             &bar.filter,
@@ -241,6 +262,20 @@ impl QueryBar {
             });
         });
         bar
+    }
+
+    /// The fields the completion popovers offer (the documents seen so far).
+    pub fn set_fields(&self, fields: Rc<Vec<Field>>) {
+        for c in &self.completers {
+            c.set_fields(fields.clone());
+        }
+    }
+
+    /// Unparent the popovers before the tab is dropped.
+    pub fn teardown(&self) {
+        for c in &self.completers {
+            c.detach();
+        }
     }
 
     /// Clear the filter and every option, then re-run.

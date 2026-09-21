@@ -14,6 +14,15 @@ use gtk4 as gtk;
 use gtk4::glib;
 use std::rc::Rc;
 
+/// Whether the focused entry has a completion popover up (`ui::completer`).
+fn completing(window: &gtk::Window) -> bool {
+    let Some(w) = GtkWindowExt::focus(window) else {
+        return false;
+    };
+    let class = crate::ui::completer::COMPLETING_CLASS;
+    w.has_css_class(class) || w.parent().is_some_and(|p| p.has_css_class(class))
+}
+
 /// Whether the focused widget consumes typing.
 pub fn text_has_focus(window: &gtk::Window) -> bool {
     let Some(w) = GtkWindowExt::focus(window) else {
@@ -122,8 +131,9 @@ impl App {
         let mods = state & gtk::accelerator_get_default_mod_mask();
         if text_has_focus(&window) {
             if keyval == Key::Escape && mods.is_empty() {
-                // Let a palette entry close itself; otherwise blur to the pane.
-                if self.focus.current() == Scope::Palette {
+                // Let a palette entry close itself, and an entry with a
+                // completion popover close that; otherwise blur to the pane.
+                if self.focus.current() == Scope::Palette || completing(&window) {
                     return glib::Propagation::Proceed;
                 }
                 self.blur_to_pane();

@@ -5,6 +5,7 @@ pub mod explain;
 pub mod export;
 pub mod import;
 pub mod ops;
+pub mod perf;
 pub mod pipeline;
 pub mod profile;
 pub mod schema;

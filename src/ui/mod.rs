@@ -1,7 +1,9 @@
 //! Shared widget helpers. Everything here runs on the GTK thread.
 pub mod aggregation;
+pub mod ai;
 pub mod bulk;
 pub mod collection;
+pub mod completer;
 pub mod connections;
 pub mod documents;
 pub mod editor_pane;
@@ -14,6 +16,7 @@ pub mod indexes;
 pub mod manage;
 pub mod my_queries;
 pub mod palette;
+pub mod performance;
 pub mod query_bar;
 pub mod schema;
 pub mod settings;

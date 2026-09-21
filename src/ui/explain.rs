@@ -32,6 +32,8 @@ pub struct ExplainPane {
     details: sourceview5::View,
     raw_view: sourceview5::View,
     status: gtk::Label,
+    explanation: gtk::Box,
+    explanation_label: gtk::Label,
 
     pub conn: ConnectionId,
     pub ns: Namespace,
@@ -146,10 +148,47 @@ impl ExplainPane {
         bar.append(&verbosity);
         bar.append(&status);
         bar.append(&spinner);
+        let ai_btn = gtk::Button::builder()
+            .label("Explain with AI")
+            .tooltip_text("Ask the AI backend to explain this plan (Ctrl+I)")
+            .focus_on_click(false)
+            .build();
+        bar.append(&ai_btn);
         bar.append(&raw_toggle);
         bar.append(&copy);
         bar.append(&run_btn);
         bar.append(&stop_btn);
+
+        // The AI's explanation, shown under the tiles once asked for.
+        let explanation_label = gtk::Label::builder()
+            .xalign(0.0)
+            .wrap(true)
+            .selectable(true)
+            .build();
+        let explanation_close = gtk::Button::builder()
+            .icon_name("window-close-symbolic")
+            .tooltip_text("Dismiss")
+            .valign(gtk::Align::Start)
+            .css_classes(["flat"])
+            .build();
+        let explanation_head = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        explanation_head.append(
+            &gtk::Label::builder()
+                .label("AI explanation")
+                .xalign(0.0)
+                .hexpand(true)
+                .css_classes(["heading"])
+                .build(),
+        );
+        explanation_head.append(&explanation_close);
+        let explanation = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        explanation.add_css_class("viti-ai-card");
+        explanation.set_margin_start(8);
+        explanation.set_margin_end(8);
+        explanation.set_margin_bottom(6);
+        explanation.set_visible(false);
+        explanation.append(&explanation_head);
+        explanation.append(&explanation_label);
 
         let tiles_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         tiles_box.set_margin_start(8);
@@ -297,6 +336,7 @@ impl ExplainPane {
         root.add_css_class("viti-explain");
         root.append(&bar);
         root.append(&tiles_box);
+        root.append(&explanation);
         root.append(&stack);
 
         let pane = Rc::new(Self {
@@ -316,6 +356,8 @@ impl ExplainPane {
             details,
             raw_view,
             status,
+            explanation: explanation.clone(),
+            explanation_label,
             conn,
             ns,
             app: Rc::downgrade(app),
@@ -343,6 +385,14 @@ impl ExplainPane {
         {
             let p = pane.clone();
             copy.connect_clicked(move |_| p.copy_raw());
+        }
+        {
+            let p = pane.clone();
+            ai_btn.connect_clicked(move |_| p.ai_explain());
+        }
+        {
+            let p = pane.clone();
+            explanation_close.connect_clicked(move |_| p.set_explanation(None));
         }
         {
             let p = pane.clone();
@@ -590,6 +640,33 @@ impl ExplainPane {
 
     pub fn toggle_view(&self) {
         self.raw_toggle.set_active(!self.raw_toggle.is_active());
+    }
+
+    /// The last explain output as Relaxed Extended JSON (empty until run).
+    pub fn raw_text(&self) -> String {
+        self.raw.borrow().clone()
+    }
+
+    /// Ask the AI backend to explain the current plan.
+    pub fn ai_explain(&self) {
+        if let Some(app) = self.app() {
+            crate::ui::ai::ask(
+                &app,
+                Some(crate::ai::Task::ExplainPlan),
+                Some(String::new()),
+            );
+        }
+    }
+
+    /// Show (or, with `None`, hide) the AI's explanation under the tiles.
+    pub fn set_explanation(&self, text: Option<&str>) {
+        match text {
+            Some(t) => {
+                self.explanation_label.set_text(t.trim());
+                self.explanation.set_visible(true);
+            }
+            None => self.explanation.set_visible(false),
+        }
     }
 
     pub fn copy_raw(&self) {

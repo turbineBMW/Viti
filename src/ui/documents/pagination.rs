@@ -195,11 +195,11 @@ impl DocumentsPane {
             let weak = Rc::downgrade(self);
             let dialog = dialog.downgrade();
             last.connect_clicked(move |_| {
-                if let (Some(pane), Some(dialog)) = (weak.upgrade(), dialog.upgrade()) {
-                    if let Some(total) = pane.total.get() {
-                        dialog.close();
-                        pane.goto_page(page_count(total, pane.page_size.get()).max(1));
-                    }
+                if let (Some(pane), Some(dialog)) = (weak.upgrade(), dialog.upgrade())
+                    && let Some(total) = pane.total.get()
+                {
+                    dialog.close();
+                    pane.goto_page(page_count(total, pane.page_size.get()).max(1));
                 }
             });
         }

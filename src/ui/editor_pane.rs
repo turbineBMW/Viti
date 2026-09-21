@@ -42,6 +42,7 @@ pub struct EditorJob {
 }
 
 type ExitHandler = Rc<dyn Fn(EditorJob, i32)>;
+type SpawnFailedHandler = Rc<dyn Fn(EditorJob, String)>;
 
 pub struct EditorPane {
     pub root: gtk::Box,
@@ -51,6 +52,7 @@ pub struct EditorPane {
     pub job: RefCell<Option<EditorJob>>,
     pub shell_running: std::cell::Cell<bool>,
     on_exit: RefCell<Option<ExitHandler>>,
+    on_spawn_failed: RefCell<Option<SpawnFailedHandler>>,
     dialog: RefCell<Option<adw::Dialog>>,
     parent: RefCell<Option<gtk::Window>>,
 }
@@ -86,6 +88,7 @@ impl EditorPane {
             job: RefCell::new(None),
             shell_running: std::cell::Cell::new(false),
             on_exit: RefCell::new(None),
+            on_spawn_failed: RefCell::new(None),
             dialog: RefCell::new(None),
             parent: RefCell::new(None),
         });
@@ -118,6 +121,12 @@ impl EditorPane {
 
     pub fn set_on_exit(&self, f: impl Fn(EditorJob, i32) + 'static) {
         *self.on_exit.borrow_mut() = Some(Rc::new(f));
+    }
+
+    /// The editor could not be started: the job is handed back so the caller
+    /// can clean up and tell the user.
+    pub fn set_on_spawn_failed(&self, f: impl Fn(EditorJob, String) + 'static) {
+        *self.on_spawn_failed.borrow_mut() = Some(Rc::new(f));
     }
 
     pub fn is_shown(&self) -> bool {
@@ -176,7 +185,7 @@ impl EditorPane {
     }
 
     pub fn open(
-        &self,
+        self: &Rc<Self>,
         settings: &Settings,
         kind: JobKind,
         text: String,
@@ -185,6 +194,7 @@ impl EditorPane {
         if self.busy() {
             anyhow::bail!("the editor is already open; finish that edit first");
         }
+        let argv = editor_argv(settings)?;
         let dir = gtk::glib::user_runtime_dir();
         let file = tempfile::Builder::new()
             .prefix("viti-")
@@ -196,35 +206,64 @@ impl EditorPane {
             })?;
         std::fs::write(file.path(), text.as_bytes())?;
         let (_, path) = file.keep()?;
-        let mut argv = settings.editor_argv();
+        let mut argv = argv;
         argv.push(path.to_string_lossy().into_owned());
-        *self.job.borrow_mut() = Some(EditorJob {
-            id: uuid::Uuid::new_v4(),
-            path: path.clone(),
-            kind,
-            original_text: text,
-        });
-        self.show("editor", title);
-        self.editor.reset(true, true);
-        spawn_argv(&self.editor, &argv, None);
-        self.editor.grab_focus();
+        self.run_editor(
+            argv,
+            EditorJob {
+                id: uuid::Uuid::new_v4(),
+                path,
+                kind,
+                original_text: text,
+            },
+            title,
+        );
         Ok(())
     }
 
     /// Reopen the same file after a parse error, so nothing typed is lost.
-    pub fn reopen(&self, settings: &Settings, job: EditorJob, title: &str) {
-        let mut argv = settings.editor_argv();
+    pub fn reopen(
+        self: &Rc<Self>,
+        settings: &Settings,
+        job: EditorJob,
+        title: &str,
+    ) -> anyhow::Result<()> {
+        if self.busy() {
+            anyhow::bail!("the editor is already open; finish that edit first");
+        }
+        let mut argv = editor_argv(settings)?;
         argv.push(job.path.to_string_lossy().into_owned());
+        self.run_editor(argv, job, title);
+        Ok(())
+    }
+
+    /// Show the dialog and start the editor. A failed spawn never reaches
+    /// `child_exited`, so it releases the job itself: the dialog would
+    /// otherwise stay uncloseable and block the window.
+    fn run_editor(self: &Rc<Self>, argv: Vec<String>, job: EditorJob, title: &str) {
         *self.job.borrow_mut() = Some(job);
         self.show("editor", title);
         self.editor.reset(true, true);
-        spawn_argv(&self.editor, &argv, None);
+        let p = Rc::downgrade(self);
+        spawn_argv(&self.editor, &argv, None, move |e| {
+            let Some(p) = p.upgrade() else { return };
+            let job = p.job.borrow_mut().take();
+            p.hide();
+            let cb = p.on_spawn_failed.borrow().clone();
+            if let (Some(job), Some(cb)) = (job, cb) {
+                cb(job, e.to_string());
+            }
+        });
         self.editor.grab_focus();
     }
 
     /// Start (or refocus) mongosh on the given URI; the password is entered in
     /// the terminal, never passed on the command line.
-    pub fn toggle_shell(&self, settings: &Settings, uri: Option<(String, Option<String>)>) {
+    pub fn toggle_shell(
+        self: &Rc<Self>,
+        settings: &Settings,
+        uri: Option<(String, Option<String>)>,
+    ) {
         if self.is_shown() && self.stack.visible_child_name().as_deref() == Some("shell") {
             self.hide();
             return;
@@ -245,7 +284,12 @@ impl EditorPane {
                 argv.push(u);
             }
             self.shell.reset(true, true);
-            spawn_argv(&self.shell, &argv, None);
+            let running = Rc::downgrade(self);
+            spawn_argv(&self.shell, &argv, None, move |_| {
+                if let Some(p) = running.upgrade() {
+                    p.shell_running.set(false);
+                }
+            });
             self.shell_running.set(true);
         }
         self.shell.grab_focus();
@@ -256,9 +300,25 @@ impl EditorPane {
     }
 }
 
+/// The editor argv, refused up front when the program is not on `PATH`.
+fn editor_argv(settings: &Settings) -> anyhow::Result<Vec<String>> {
+    let argv = settings.editor_argv();
+    let program = argv.first().map(String::as_str).unwrap_or_default();
+    if gtk::glib::find_program_in_path(program).is_none() {
+        anyhow::bail!("editor \"{program}\" not found; set the editor command in Preferences");
+    }
+    Ok(argv)
+}
+
 /// Spawn `argv` in the terminal with a clean environment: TERM describes vte
 /// itself, and TMUX/TERM_PROGRAM from the launching terminal are scrubbed.
-pub fn spawn_argv(term: &vte::Terminal, argv: &[String], cwd: Option<&str>) {
+/// `on_fail` runs after the error is printed in the terminal.
+pub fn spawn_argv(
+    term: &vte::Terminal,
+    argv: &[String],
+    cwd: Option<&str>,
+    on_fail: impl Fn(&gtk::glib::Error) + 'static,
+) {
     const SCRUB: &[&str] = &[
         "TERM",
         "TMUX",
@@ -286,10 +346,11 @@ pub fn spawn_argv(term: &vte::Terminal, argv: &[String], cwd: Option<&str>) {
         -1,
         None::<&gtk::gio::Cancellable>,
         move |res| {
-            if let Err(e) = res
-                && let Some(t) = tw.upgrade()
-            {
-                t.feed(format!("\r\n\x1b[31m[viti] spawn failed: {e}\x1b[0m\r\n").as_bytes());
+            if let Err(e) = res {
+                if let Some(t) = tw.upgrade() {
+                    t.feed(format!("\r\n\x1b[31m[viti] spawn failed: {e}\x1b[0m\r\n").as_bytes());
+                }
+                on_fail(&e);
             }
         },
     );

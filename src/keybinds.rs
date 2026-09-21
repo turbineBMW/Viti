@@ -53,6 +53,16 @@ pub const ACTIONS: &[Action] = &[
     g("global.next-tab", "Next tab", "<Control>Page_Down"),
     g("global.prev-tab", "Previous tab", "<Control>Page_Up"),
     g("global.shell", "Toggle mongosh", "<Control>grave"),
+    g(
+        "global.ai",
+        "Ask AI: query, pipeline, plan explanation or indexes for the current page",
+        "<Control>i",
+    ),
+    g(
+        "global.performance",
+        "Performance page for the current connection",
+        "<Control><Shift>p",
+    ),
     g("global.settings", "Settings", "<Control>comma"),
     g("global.refresh", "Refresh", "<Control>r"),
     g("global.my-queries", "My Queries", "<Control><Shift>y"),
@@ -410,6 +420,27 @@ pub const ACTIONS: &[Action] = &[
         Scope::Aggregation,
     ),
     // Explain
+    // Performance
+    a(
+        "perf.pause",
+        "Pause / resume sampling",
+        "space",
+        Scope::Performance,
+    ),
+    a("perf.refresh", "Sample now", "r", Scope::Performance),
+    a("perf.peek", "Operation details", "o", Scope::Performance),
+    a(
+        "perf.peek-enter",
+        "Operation details",
+        "Return",
+        Scope::Performance,
+    ),
+    a(
+        "perf.kill",
+        "Kill the selected operation",
+        "<Control>d",
+        Scope::Performance,
+    ),
     a("explain.run", "Run explain", "<Shift>r", Scope::Explain),
     a(
         "explain.toggle-view",

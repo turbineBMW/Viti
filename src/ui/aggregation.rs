@@ -476,6 +476,7 @@ impl AggregationPane {
                 "agg.export-language",
             ),
             ("explain", "Explain pipeline", "agg.explain"),
+            ("ai", "Generate pipeline with AI…", "global.ai"),
         ] {
             let a = gio::SimpleAction::new(name, None);
             actions.add_action(&a);
@@ -764,6 +765,7 @@ impl AggregationPane {
                 "edit-external" => a.connect_activate(move |_, _| p.edit_external()),
                 "create-view" => a.connect_activate(move |_, _| p.create_view()),
                 "export-language" => a.connect_activate(move |_, _| p.export_language()),
+                "ai" => a.connect_activate(move |_, _| p.ai()),
                 _ => a.connect_activate(move |_, _| p.explain()),
             };
         }
@@ -2177,6 +2179,13 @@ impl AggregationPane {
     }
 
     /// `P`: the Explain page, pipeline source.
+    /// Generate a pipeline from a description (the AI backend).
+    pub fn ai(&self) {
+        if let Some(app) = self.app() {
+            crate::ui::ai::ask(&app, Some(crate::ai::Task::Pipeline), None);
+        }
+    }
+
     pub fn explain(&self) {
         if let Some(app) = self.app() {
             app.explain_current("pipeline");

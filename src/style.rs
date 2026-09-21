@@ -109,6 +109,9 @@ tabbar tab:selected:active, tabbar tabbox.single-tab tab:selected:active {
 .viti-table cell { padding: 2px 8px; }
 .viti-terminal { padding: 4px; }
 .viti-mono { font-family: monospace; }
+.viti-complete > contents { padding: 0; }
+.viti-complete-list { background: transparent; }
+.viti-complete-list > row { padding: 4px 10px; min-width: 260px; }
 .viti-dim { color: alpha(currentColor, 0.6); }
 .viti-count { font-size: 0.9em; color: alpha(currentColor, 0.6); }
 /* Aggregations: stage cards and their previews. */
@@ -126,6 +129,11 @@ tabbar tab:selected:active, tabbar tabbox.single-tab tab:selected:active {
 /* Explain: stat tiles and the plan tree. */
 .viti-tile { background: var(--card-bg-color); color: var(--card-fg-color); border-radius: 8px; padding: 6px 12px; border: 1px solid alpha(currentColor, 0.08); }
 .viti-tile .value { font-size: 1.25em; font-weight: 700; }
+.viti-perf-card { background: var(--card-bg-color); color: var(--card-fg-color); border-radius: 8px; padding: 8px 12px; border: 1px solid alpha(currentColor, 0.08); }
+.viti-perf-hot > row { padding: 2px 0; }
+.viti-perf-bar trough { min-height: 4px; }
+.viti-perf-bar block { min-height: 4px; }
+.viti-ai-card { background: var(--card-bg-color); color: var(--card-fg-color); border-radius: 8px; padding: 8px 12px; border: 1px solid alpha(var(--accent-color), 0.4); }
 .viti-collscan { color: var(--error-color); }
 .viti-explain.viti-focused { outline: none; }
 .viti-explain.viti-focused listview > row:selected { outline: 1px solid var(--accent-color); outline-offset: -2px; border-radius: 6px; }

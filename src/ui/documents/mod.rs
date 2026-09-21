@@ -47,6 +47,8 @@ pub struct DocumentsPane {
     pub ns: Namespace,
     app: Weak<App>,
     pub docs: RefCell<Vec<Document>>,
+    /// Every field path seen on any page so far, for the query bar's completions.
+    fields: RefCell<Vec<crate::query_complete::Field>>,
     pub marked: RefCell<BTreeSet<usize>>,
     pub view: Cell<DocView>,
     pub page: Cell<u64>,
@@ -128,6 +130,7 @@ impl DocumentsPane {
         let act_export_lang = gio::SimpleAction::new("export-language", None);
         let act_export = gio::SimpleAction::new("export", None);
         let act_import = gio::SimpleAction::new("import", None);
+        let act_ai = gio::SimpleAction::new("ai", None);
         let expand_action =
             gio::SimpleAction::new_stateful("expand-all", None, &false.to_variant());
         let act_size = gio::SimpleAction::new_stateful(
@@ -146,6 +149,7 @@ impl DocumentsPane {
             &act_export_lang,
             &act_export,
             &act_import,
+            &act_ai,
         ] {
             actions.add_action(a);
         }
@@ -189,6 +193,10 @@ impl DocumentsPane {
         tools.append(
             Some(&tip("Export query to language…", "docs.export-language")),
             Some("docs.export-language"),
+        );
+        tools.append(
+            Some(&tip("Generate query with AI…", "global.ai")),
+            Some("docs.ai"),
         );
         menu.append_section(None, &tools);
         let sizes = gio::Menu::new();
@@ -249,6 +257,7 @@ impl DocumentsPane {
             ns,
             app: Rc::downgrade(app),
             docs: RefCell::new(Vec::new()),
+            fields: RefCell::new(Vec::new()),
             marked: RefCell::new(BTreeSet::new()),
             view: Cell::new(settings.default_view),
             page: Cell::new(0),
@@ -380,6 +389,17 @@ impl DocumentsPane {
         {
             let p = pane.clone();
             act_export_lang.connect_activate(move |_, _| p.export_language());
+        }
+        {
+            let p = pane.clone();
+            let ask = move || {
+                if let Some(app) = p.app() {
+                    crate::ui::ai::ask(&app, Some(crate::ai::Task::Query), None);
+                }
+            };
+            let ask2 = ask.clone();
+            act_ai.connect_activate(move |_, _| ask());
+            pane.query_bar.ai_btn.connect_clicked(move |_| ask2());
         }
         {
             let p = pane.clone();
@@ -869,6 +889,14 @@ impl DocumentsPane {
         self.marked.borrow_mut().clear();
         self.detach_views();
         *self.columns.borrow_mut() = columns;
+        {
+            let mut fields = self.fields.borrow_mut();
+            let before = fields.len();
+            crate::query_complete::merge_fields(&mut fields, &docs);
+            if fields.len() != before {
+                self.query_bar.set_fields(Rc::new(fields.clone()));
+            }
+        }
         let n = docs.len();
         let old = self.docs.replace(docs);
         // Freeing large BSON trees can itself stall GTK.
@@ -959,7 +987,7 @@ impl DocumentsPane {
         had
     }
 
-    pub fn peek(&self, full: bool) {
+    pub fn peek(self: &Rc<Self>, full: bool) {
         let Some(doc) = self.current_doc() else {
             return;
         };
@@ -987,8 +1015,15 @@ impl DocumentsPane {
             .icon_name("document-edit-symbolic")
             .tooltip_text("Edit (e)")
             .build();
+        let delete = gtk::Button::builder()
+            .icon_name("user-trash-symbolic")
+            .tooltip_text("Delete (Ctrl+D)")
+            .css_classes(["destructive-action", "flat"])
+            .visible(doc.contains_key("_id"))
+            .build();
         header.pack_end(&copy);
         header.pack_end(&edit);
+        header.pack_start(&delete);
         toolbar.add_top_bar(&header);
         let view = crate::ui::json_view(&text, false);
         view.set_can_focus(true);
@@ -1016,6 +1051,41 @@ impl DocumentsPane {
                 }
             });
         }
+        // Confirm over the quick view; it closes once the delete is confirmed.
+        let ask_delete: Rc<dyn Fn()> = {
+            let dialog = dialog.clone();
+            let me = self.clone();
+            let id = doc.get("_id").cloned();
+            Rc::new(move || {
+                let Some(id) = id.clone() else { return };
+                let Some(app) = me.app() else { return };
+                if app.write_guard().is_err() {
+                    return;
+                }
+                let parent = dialog.clone();
+                let dialog = dialog.clone();
+                let me = me.clone();
+                crate::ui::confirm(
+                    &parent,
+                    "Delete this document?",
+                    &format!(
+                        "{} from {}. This cannot be undone.",
+                        ejson::id_display(&id),
+                        me.ns
+                    ),
+                    "Delete",
+                    true,
+                    move || {
+                        dialog.close();
+                        me.delete_ids(vec![id.clone()], false);
+                    },
+                );
+            })
+        };
+        {
+            let ask = ask_delete.clone();
+            delete.connect_clicked(move |_| ask());
+        }
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         {
@@ -1023,6 +1093,7 @@ impl DocumentsPane {
             let text = text.clone();
             let app = app.clone();
             let scroller = scroller.clone();
+            let ask_delete = ask_delete.clone();
             keys.connect_key_pressed(move |_, key, _, state| {
                 use gtk::gdk::Key;
                 let ctrl = state.contains(gtk::gdk::ModifierType::CONTROL_MASK);
@@ -1048,6 +1119,10 @@ impl DocumentsPane {
                         if let Some(tab) = app.current_tab() {
                             tab.docs.edit_external();
                         }
+                        glib::Propagation::Stop
+                    }
+                    Key::d if ctrl => {
+                        ask_delete();
                         glib::Propagation::Stop
                     }
                     Key::j | Key::k | Key::g | Key::G => {
@@ -1266,8 +1341,14 @@ impl DocumentsPane {
         }
     }
 
+    /// `E`: the external editor, but only when settings pick it; with the
+    /// in-app editor chosen this is the same as `e`.
     pub fn edit_external(self: &Rc<Self>) {
         let Some(app) = self.app() else { return };
+        if !app.config.borrow().settings.uses_external_editor() {
+            self.edit_inline();
+            return;
+        }
         let targets = self.targets();
         if targets.is_empty() {
             return;
@@ -1341,9 +1422,16 @@ impl DocumentsPane {
                 .filter_map(|&i| docs.get(i).and_then(|d| d.get("_id").cloned()))
                 .collect()
         };
-        if ids.is_empty() {
+        self.delete_ids(ids, confirm);
+    }
+
+    /// Delete these `_id`s (the quick view deletes the one it shows).
+    pub fn delete_ids(self: &Rc<Self>, ids: Vec<Bson>, confirm: bool) {
+        let Some(app) = self.app() else { return };
+        if ids.is_empty() || app.write_guard().is_err() {
             return;
         }
+        let n = ids.len();
         let me = self.clone();
         let go = move || {
             let Some(app) = me.app() else { return };
@@ -1370,7 +1458,6 @@ impl DocumentsPane {
             });
         };
         if confirm {
-            let n = targets.len();
             crate::ui::confirm(
                 &app.window.clone(),
                 &format!("Delete {n} document{}?", if n == 1 { "" } else { "s" }),

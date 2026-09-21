@@ -7,6 +7,7 @@
 #![allow(dead_code)]
 
 mod accent;
+mod ai;
 mod app;
 mod commands;
 mod config;
@@ -17,6 +18,7 @@ mod focus;
 mod keybinds;
 mod mongo;
 mod notify;
+mod query_complete;
 mod rt;
 mod secrets;
 mod style;
