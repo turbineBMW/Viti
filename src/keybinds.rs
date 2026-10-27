@@ -41,6 +41,11 @@ const fn g(id: &'static str, title: &'static str, accel: &'static str) -> Action
 pub const ACTIONS: &[Action] = &[
     // Global chords (fire everywhere except inside a terminal)
     g("global.palette", "Command line", "colon"),
+    g(
+        "global.command-palette",
+        "Command palette: every action on screen",
+        "<Control>slash",
+    ),
     g("global.filter", "Filter / query bar", "slash"),
     g("global.help", "Show keybindings", "question"),
     g("global.connections", "Connections", "<Control>o"),
