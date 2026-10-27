@@ -53,7 +53,9 @@ src/
                  parse_response -> Query / pipeline text / explanation / index suggestions; tested
   query_complete.rs  query bar completions: merge_fields(docs) -> dotted paths + types; complete(text, caret,
                  fields, Kind) -> field / operator / constructor (`ObjectId("…")`) replacements; apply(); tested
-  accent.rs      GSettings accent fallback for non-GNOME portals (copied from Rustle)
+  accent.rs      GSettings accent fallback for non-GNOME portals + Omarchy override
+  omarchy.rs     Omarchy colors.toml -> libadwaita CSS variables (ported from Rustle)
+  omarchy_theme.rs GTK provider + live Omarchy theme monitor
   notify.rs      fdo D-Bus desktop notifications (copied from Bubo)
   events.rs      Event bus from tokio to the GTK thread
   export_to_language.rs  filter/pipeline -> C#/Go/Java/Node/PHP/Python/Ruby/Rust literals (+ driver code); golden tests
@@ -148,7 +150,8 @@ data/            .desktop, icons;  scripts/seed.js
   be cancelled with Escape (`kill_by_comment`).
 - **Errors shown to the user are also logged** at the boundary naming the resource
   (`toast_error("query on db.coll", &e)`).
-- **Accent/theme:** CSS uses `var(--accent-color)` etc.; user `style.css` beats everything.
+- **Accent/theme:** CSS uses `var(--accent-color)` etc. Omarchy support layers the active
+  palette above built-in CSS when enabled; user `style.css` beats everything.
 - Commits: Conventional Commits, terse, no AI/co-author trailers.
 
 ## Roadmap

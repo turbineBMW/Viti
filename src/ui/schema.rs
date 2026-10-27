@@ -182,7 +182,7 @@ fn draw_chart(row: &Row, area: &gtk::DrawingArea, cr: &gtk::cairo::Context, w: i
     let w = w as f64;
     let h = h as f64;
     let fg = area.color();
-    let accent = adw::StyleManager::default().accent_color_rgba();
+    let accent = crate::accent::accent_rgba();
     let counts: Vec<usize> = match &row.chart {
         Chart::Bars(b) => b.iter().map(|b| b.count).collect(),
         Chart::Histogram { bins, .. } => bins.iter().map(|b| b.count).collect(),
@@ -469,6 +469,7 @@ impl SchemaPane {
                 .hexpand(true)
                 .content_height(58)
                 .build();
+            crate::accent::watch(&area, |area| area.queue_draw());
             let caption = gtk::Label::builder()
                 .xalign(0.0)
                 .ellipsize(gtk::pango::EllipsizeMode::End)

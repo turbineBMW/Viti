@@ -6,17 +6,24 @@
 //! "not found" and libadwaita silently falls back to blue, so when it reports
 //! no system support we read `org.gnome.desktop.interface accent-color`
 //! ourselves and override its `--accent-*` CSS variables.
+//!
+//! A followed Omarchy theme outranks both. Its CSS handles widgets, while
+//! [`set_override`] exposes the same accent to custom-drawn UI.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use adw::prelude::*;
 use gtk4 as gtk;
-use gtk4::gio;
+use gtk4::{gio, glib};
 
 const INTERFACE_SCHEMA: &str = "org.gnome.desktop.interface";
 
 thread_local! {
     static FALLBACK: RefCell<Option<Fallback>> = const { RefCell::new(None) };
+    static OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// Each returns false once its widget is gone, and is then dropped.
+    static WATCHERS: RefCell<Vec<Box<dyn Fn() -> bool>>> = const { RefCell::new(Vec::new()) };
+    static HOOKED: Cell<bool> = const { Cell::new(false) };
 }
 
 struct Fallback {
@@ -28,12 +35,21 @@ struct Fallback {
 /// libadwaita's style manager, or through GSettings where the portal
 /// doesn't relay it.
 pub fn accent_hex() -> String {
+    rgba_hex(&accent_rgba())
+}
+
+/// The current accent for custom drawing, including an Omarchy override.
+pub fn accent_rgba() -> gtk::gdk::RGBA {
+    if let Some(accent) = OVERRIDE.with(|cell| cell.borrow().clone())
+        && let Ok(rgba) = gtk::gdk::RGBA::parse(&accent)
+    {
+        return rgba;
+    }
     let manager = adw::StyleManager::default();
-    let rgba = match fallback_accent() {
+    match fallback_accent() {
         Some(accent) => accent.to_standalone_rgba(manager.is_dark()),
         None => manager.accent_color_rgba(),
-    };
-    rgba_hex(&rgba)
+    }
 }
 
 pub fn rgba_hex(color: &gtk::gdk::RGBA) -> String {
@@ -45,23 +61,45 @@ pub fn rgba_hex(color: &gtk::gdk::RGBA) -> String {
     )
 }
 
-/// Run `on_change` now and whenever the accent or the dark/light scheme flips.
-pub fn watch(on_change: impl Fn() + 'static) {
-    let manager = adw::StyleManager::default();
-    let on_change = std::rc::Rc::new(on_change);
-    for property in ["accent-color", "dark"] {
-        let on_change = on_change.clone();
-        manager.connect_notify_local(Some(property), move |_, _| on_change());
+/// Run `on_change` whenever the accent or the dark/light scheme flips, for
+/// as long as `widget` is alive.
+pub fn watch<W: IsA<glib::Object>>(widget: &W, on_change: impl Fn(&W) + 'static) {
+    if !HOOKED.replace(true) {
+        let manager = adw::StyleManager::default();
+        manager.connect_accent_color_notify(|_| notify());
+        manager.connect_dark_notify(|_| notify());
     }
-    FALLBACK.with(|cell| {
-        if let Some(fallback) = cell.borrow().as_ref() {
-            let on_change = on_change.clone();
-            fallback
-                .settings
-                .connect_changed(Some("accent-color"), move |_, _| on_change());
+    let widget = widget.downgrade();
+    let watcher = move || match widget.upgrade() {
+        Some(widget) => {
+            on_change(&widget);
+            true
         }
+        None => false,
+    };
+    WATCHERS.with(|cell| cell.borrow_mut().push(Box::new(watcher)));
+}
+
+/// Replace the accent with a theme colour. The caller coordinates notifying
+/// watchers with any simultaneous dark/light change.
+pub fn set_override(accent: Option<String>) -> bool {
+    OVERRIDE.with(|cell| {
+        let changed = *cell.borrow() != accent;
+        cell.replace(accent);
+        changed
+    })
+}
+
+/// Run every callback registered with [`watch`].
+pub fn notify() {
+    // Taken out while they run, so a callback may register another.
+    let mut watchers = WATCHERS.with(|cell| cell.take());
+    watchers.retain(|on_change| on_change());
+    WATCHERS.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        watchers.append(&mut cell);
+        *cell = watchers;
     });
-    on_change();
 }
 
 /// Install the GSettings fallback if libadwaita can't see the system accent.
@@ -107,7 +145,10 @@ pub fn install_fallback(display: &gtk::gdk::Display) {
         if let Some(fallback) = cell.borrow().as_ref() {
             fallback
                 .settings
-                .connect_changed(Some("accent-color"), move |_, _| refresh());
+                .connect_changed(Some("accent-color"), move |_, _| {
+                    refresh();
+                    notify();
+                });
         }
     });
     manager.connect_dark_notify(move |_| refresh());

@@ -21,6 +21,7 @@ workflows of MongoDB Compass with a fast, keyboard-first interface.
   MongoDB Compass profiles.
 - Optionally draft queries and pipelines through local `claude` or `codex`
   commands.
+- Follow the active Omarchy desktop palette and theme switches live.
 
 ## Build and install
 
@@ -84,3 +85,16 @@ cargo test
 
 Tests that require a live MongoDB instance are skipped unless `VITI_TEST_URI`
 is set.
+
+## Omarchy themes
+
+When an Omarchy theme is present, *Settings → Theme → Follow Omarchy theme*
+is enabled by default. Viti reads the active theme's `colors.toml`, applies its
+window colours, accent, and light/dark mode, and follows `omarchy theme set`
+live. Turning the option off restores Viti's System/Light/Dark preference.
+
+A theme can replace the generated CSS by shipping a `viti.css` with
+libadwaita CSS variables, either directly or from a
+`~/.config/omarchy/themed/viti.css.tpl` template. The theme's `colors.toml`
+is still required: it decides light or dark mode and the accent of drawn
+charts. Viti's own `~/.config/viti/style.css` remains the final override.
