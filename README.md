@@ -69,8 +69,11 @@ Useful shortcuts:
 | Key | Action |
 | --- | --- |
 | `Ctrl+O` | Connections |
-| `/` | Filter or focus the query bar |
-| `:` | Command palette |
+| `Tab` / `Shift+Tab` | Switch between the sidebar and the content (also `Ctrl+L` / `Ctrl+H`) |
+| `↑` `↓` `←` `→` | Move in the sidebar and the lists, like `j` `k` `h` `l` |
+| `/` | Filter the sidebar, or focus the query bar (from any page of a tab) |
+| `:` | Command line |
+| `Ctrl+/` | Command palette: every action and `:` command on screen |
 | `e` / `E` | Edit inline / with the configured editor |
 | `v` | Cycle document views |
 | `?` | Show all shortcuts |

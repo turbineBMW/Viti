@@ -831,7 +831,7 @@ impl App {
         let tab = CollectionTab::new(self, conn, ns);
         self.focus.register(&tab.docs.views, Scope::Documents);
         self.focus
-            .register(&tab.docs.query_bar.root, Scope::QueryBar);
+            .register_passive(&tab.docs.query_bar.root, Scope::QueryBar);
         self.focus.register(&tab.agg.root, Scope::Aggregation);
         self.focus.register(&tab.explain.root, Scope::Explain);
         self.focus.register(&tab.indexes.root, Scope::Indexes);
@@ -1211,7 +1211,7 @@ impl App {
         self.current_tab().map(|t| t.docs.clone())
     }
 
-    fn open_palette(&self, initial: &str) {
+    pub fn open_palette(&self, initial: &str) {
         self.cmd_revealer.set_reveal_child(true);
         self.palette.open(initial);
     }
@@ -1252,25 +1252,29 @@ impl App {
         match id {
             // --- global chords ---
             "global.palette" => self.open_palette(""),
-            "global.filter" => match scope {
-                Scope::Sidebar => {
+            "global.command-palette" => crate::ui::command_palette::show(self),
+            "global.filter" => {
+                // In the sidebar: its filter. On a tab: the query bar, going
+                // to the Documents page first if another page is showing.
+                if scope == Scope::Sidebar || self.focus_in_sidebar() {
+                    self.sidebar.filter.grab_focus();
+                } else if let Some(t) = self.current_tab() {
+                    if t.stack.visible_child_name().as_deref() != Some("documents") {
+                        t.show_page("documents");
+                        self.sync_page_picker();
+                    }
+                    t.docs.query_bar.focus_filter();
+                } else {
                     self.sidebar.filter.grab_focus();
                 }
-                _ => {
-                    if let Some(d) = self.docs() {
-                        d.query_bar.focus_filter();
-                    } else {
-                        self.sidebar.filter.grab_focus();
-                    }
-                }
-            },
+            }
             "global.help" => crate::ui::help::show(self),
             "global.connections" => crate::ui::connections::show_manager(self),
             "global.focus-next" => {
-                self.focus.cycle(1);
+                self.cycle_panes(1);
             }
             "global.focus-prev" => {
-                self.focus.cycle(-1);
+                self.cycle_panes(-1);
             }
             "global.toggle-sidebar" => self.split.set_show_sidebar(!self.split.shows_sidebar()),
             "global.query-options" => match scope {

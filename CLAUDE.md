@@ -40,8 +40,9 @@ src/
   main.rs        tracing, adw::Application, `viti [uri]`
   app.rs         Rc<App>: all widget handles + state, run_action (vi keys), run_command (:), editor round-trip,
                  long ops (import/export in the banner with Cancel: abort + killOp + remove partial file)
-  dispatch.rs    window key controllers: chords (ShortcutController) + normal-mode keys (EventControllerKey)
-  focus.rs       Scope enum; which pane owns the vi keys; `.viti-focused`; Tab cycling
+  dispatch.rs    window key controllers: chords (ShortcutController) + normal-mode keys (EventControllerKey);
+                 arrows/Home/End alias the vi motions; Tab cycles the major panes (sidebar | tab page | terminal)
+  focus.rs       Scope enum; which pane owns the vi keys; `.viti-focused`; register_passive (query bar: scope only)
   keybinds.rs    ACTIONS registry (id, title, default accel, scope, text_safe); overrides; keymap
   commands.rs    `:` grammar: parse() + complete(); pure, tested
   config.rs      ~/.config/viti/{config,connections,queries,pipelines,keybindings}.json; #[serde(default)], atomic writes
@@ -95,6 +96,7 @@ src/
     connections.rs  profile editor (General/Auth/TLS/SSH/Advanced pages two-way synced with the
                  URI entry) + manager (Ctrl+O) with import/export (reads Compass exports)
     collection.rs   one tab: ViewStack of Documents + Aggregations + Schema + Explain + Indexes + Validation
+    command_palette.rs  `Ctrl+/`: searchable list of the actions of Global + sidebar + current page and the `:` commands
     aggregation.rs  AggregationPane: stage cards (operator dropdown, editor, switch, live output preview),
                  text mode, results paged below, focus mode dialog, save/open pipelines, create view,
                  export to language, `Ctrl+E` external editor (JobKind::Pipeline)

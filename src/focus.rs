@@ -66,6 +66,19 @@ impl Scope {
     pub fn is_terminal(self) -> bool {
         matches!(self, Scope::Shell | Scope::Editor)
     }
+    /// Pages shown in the tab view: one of them is "the content" Tab toggles to.
+    pub fn is_content(self) -> bool {
+        matches!(
+            self,
+            Scope::Documents
+                | Scope::Aggregation
+                | Scope::Schema
+                | Scope::Explain
+                | Scope::Indexes
+                | Scope::Validation
+                | Scope::Performance
+        )
+    }
 }
 
 #[derive(Default)]
@@ -81,6 +94,15 @@ impl FocusTracker {
         w.set_focusable(true);
         w.set_can_focus(true);
         self.panes.borrow_mut().push((w.downgrade(), scope));
+    }
+
+    /// Register a scope for key lookup only: the widgets inside `root` (its
+    /// entries) own the scope's chords, but `root` itself never takes focus,
+    /// so Tab and `blur_to_pane` skip it. Used for the query bar.
+    pub fn register_passive(&self, root: &impl IsA<gtk::Widget>, scope: Scope) {
+        self.panes
+            .borrow_mut()
+            .push((root.as_ref().downgrade(), scope));
     }
 
     pub fn current(&self) -> Scope {
@@ -131,31 +153,14 @@ impl FocusTracker {
             .find(|w| w.is_mapped())
     }
 
-    /// Visible panes in registration order, for Tab cycling.
-    pub fn visible(&self) -> Vec<(gtk::Widget, Scope)> {
+    /// The mapped content pane (the current tab's page), if any.
+    pub fn content_root(&self) -> Option<(gtk::Widget, Scope)> {
         self.panes
             .borrow()
             .iter()
+            .filter(|(_, s)| s.is_content())
             .filter_map(|(w, s)| w.upgrade().map(|w| (w, *s)))
-            .filter(|(w, _)| w.is_mapped() && w.is_sensitive())
-            .collect()
-    }
-
-    /// Move focus to the next/previous visible pane.
-    pub fn cycle(&self, dir: i32) -> Option<Scope> {
-        let panes = self.visible();
-        if panes.is_empty() {
-            return None;
-        }
-        let cur = self.current();
-        let idx = panes.iter().position(|(_, s)| *s == cur);
-        let next = match idx {
-            Some(i) => (i as i32 + dir).rem_euclid(panes.len() as i32) as usize,
-            None => 0,
-        };
-        let (w, s) = &panes[next];
-        w.grab_focus();
-        Some(*s)
+            .find(|(w, _)| w.is_mapped())
     }
 
     pub fn focus(&self, scope: Scope) -> bool {
