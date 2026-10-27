@@ -57,6 +57,7 @@ pub struct App {
     pub notifier: Option<Rc<Notifier>>,
     pub(crate) shortcut_ctl: RefCell<Option<gtk::ShortcutController>>,
     style_provider: gtk::CssProvider,
+    omarchy_theme: RefCell<Option<crate::omarchy_theme::OmarchyTheme>>,
     style_monitor: RefCell<Option<gio::FileMonitor>>,
     keybindings_monitor: RefCell<Option<gio::FileMonitor>>,
     save_source: RefCell<Option<glib::SourceId>>,
@@ -106,6 +107,7 @@ impl App {
             notifier,
             shortcut_ctl: RefCell::new(None),
             style_provider: gtk::CssProvider::new(),
+            omarchy_theme: RefCell::new(None),
             style_monitor: RefCell::new(None),
             keybindings_monitor: RefCell::new(None),
             save_source: RefCell::new(None),
@@ -143,6 +145,7 @@ impl App {
         sidebar.reload_connections();
 
         app.install_builtin_css();
+        app.install_omarchy_theme();
         app.install_user_css();
         app.watch_user_css();
         app.watch_keybindings();
@@ -310,6 +313,13 @@ impl App {
         self.reload_user_css();
     }
 
+    fn install_omarchy_theme(&self) {
+        if let Some(display) = gtk::gdk::Display::default() {
+            self.omarchy_theme
+                .replace(Some(crate::omarchy_theme::OmarchyTheme::install(&display)));
+        }
+    }
+
     pub fn reload_user_css(&self) {
         self.style_provider.load_from_string(&crate::style::load());
     }
@@ -371,12 +381,20 @@ impl App {
     }
 
     pub fn apply_theme(&self) {
-        let scheme = match self.config.borrow().settings.theme {
+        let (theme, follow_omarchy) = {
+            let settings = &self.config.borrow().settings;
+            (settings.theme, settings.follow_omarchy_theme)
+        };
+        let scheme = match theme {
             Theme::System => adw::ColorScheme::Default,
             Theme::Light => adw::ColorScheme::ForceLight,
             Theme::Dark => adw::ColorScheme::ForceDark,
         };
-        adw::StyleManager::default().set_color_scheme(scheme);
+        if let Some(omarchy) = self.omarchy_theme.borrow().as_ref() {
+            omarchy.apply(follow_omarchy, scheme);
+        } else {
+            adw::StyleManager::default().set_color_scheme(scheme);
+        }
     }
 
     pub fn schedule_save(self: &Rc<Self>) {
@@ -2005,6 +2023,13 @@ impl App {
                 };
                 self.config.borrow_mut().settings.theme = t;
                 self.apply_theme();
+                if self.config.borrow().settings.follow_omarchy_theme
+                    && crate::omarchy::detected(&glib::home_dir())
+                {
+                    self.toast(
+                        "saved; following the Omarchy theme until it's turned off in Settings",
+                    );
+                }
             }
             "maxtime" => match value.and_then(|v| v.parse::<u64>().ok()) {
                 Some(ms) => self.config.borrow_mut().settings.max_time_ms = ms,

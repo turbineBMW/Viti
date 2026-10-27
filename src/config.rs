@@ -105,6 +105,8 @@ pub struct Settings {
     /// Cap applied to every server operation.
     pub max_time_ms: u64,
     pub theme: Theme,
+    /// Take colours and light/dark mode from the active Omarchy theme.
+    pub follow_omarchy_theme: bool,
     pub default_sort: String,
     pub protect_connection_strings: bool,
     pub page_size: u32,
@@ -137,6 +139,7 @@ impl Default for Settings {
             read_only: false,
             max_time_ms: 60_000,
             theme: Theme::System,
+            follow_omarchy_theme: true,
             default_sort: String::new(),
             protect_connection_strings: false,
             page_size: 25,
@@ -640,6 +643,7 @@ mod tests {
             serde_json::from_str(r#"{"page_size": 50, "bogus": 1, "theme": "dark"}"#).unwrap();
         assert_eq!(s.page_size, 50);
         assert_eq!(s.theme, Theme::Dark);
+        assert!(s.follow_omarchy_theme);
         assert_eq!(s.max_time_ms, 60_000);
     }
 

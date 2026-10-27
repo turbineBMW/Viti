@@ -206,6 +206,30 @@ pub fn show(app: &Rc<App>) {
         });
     }
     theme_group.add(&theme_row);
+    if crate::omarchy::detected(&glib::home_dir()) {
+        let subtitle = match crate::omarchy::theme_name(&glib::home_dir()) {
+            Some(name) => format!("Use the desktop palette, currently {name}"),
+            None => "Use the active desktop palette".to_string(),
+        };
+        let omarchy_row = adw::SwitchRow::builder()
+            .title("Follow Omarchy theme")
+            .subtitle(&subtitle)
+            .active(cfg.follow_omarchy_theme)
+            .build();
+        theme_row.set_sensitive(!cfg.follow_omarchy_theme);
+        {
+            let app = app.clone();
+            let theme_row = theme_row.clone();
+            omarchy_row.connect_active_notify(move |row| {
+                let enabled = row.is_active();
+                app.config.borrow_mut().settings.follow_omarchy_theme = enabled;
+                theme_row.set_sensitive(!enabled);
+                app.apply_theme();
+                app.schedule_save();
+            });
+        }
+        theme_group.add(&omarchy_row);
+    }
     general.add(&theme_group);
     dialog.add(&general);
 
