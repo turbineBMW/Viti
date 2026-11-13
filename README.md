@@ -96,8 +96,18 @@ is enabled by default. Viti reads the active theme's `colors.toml`, applies its
 window colours, accent, and light/dark mode, and follows `omarchy theme set`
 live. Turning the option off restores Viti's System/Light/Dark preference.
 
-A theme can replace the generated CSS by shipping a `viti.css` with
-libadwaita CSS variables, either directly or from a
-`~/.config/omarchy/themed/viti.css.tpl` template. The theme's `colors.toml`
-is still required: it decides light or dark mode and the accent of drawn
-charts. Viti's own `~/.config/viti/style.css` remains the final override.
+A theme can add its own `viti.css` with libadwaita CSS variables, either
+directly or from a `~/.config/omarchy/themed/viti.css.tpl` template. It is
+layered over the generated CSS, so it only needs the variables it changes.
+The theme's `colors.toml` is still required: it decides light or dark mode
+and the accent of drawn charts. Viti's own `~/.config/viti/style.css` remains
+the final override.
+
+For a see-through sidebar, set `--viti-sidebar-opacity` to a number from 0
+to 1 (not a percentage) in a `:root` rule, in `style.css` or for every theme
+in the template. It fades only the sidebar's background, not its text:
+
+```css
+/* ~/.config/omarchy/themed/viti.css.tpl or ~/.config/viti/style.css */
+:root { --viti-sidebar-opacity: 0.8; }
+```

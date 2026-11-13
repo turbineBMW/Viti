@@ -25,6 +25,10 @@ pub const TEMPLATE: &str = r#"/* viti-appearance-schema: 1
  *   .viti-stage          one aggregation stage card (.viti-stage-current)
  *   .viti-tile           one explain-plan stat tile
  *   .viti-schema-row     one field row on the Schema page
+ *
+ * A see-through sidebar (a number from 0 to 1; fades its background, never
+ * its text):
+ *   :root { --viti-sidebar-opacity: 0.85; }
  */
 "#;
 
@@ -39,6 +43,60 @@ pub fn load() -> String {
             TEMPLATE.to_string()
         }
     }
+}
+
+/// How opaque the sidebar's background is, a number from 0 to 1. Set by
+/// hand in style.css or by an Omarchy theme's `viti.css`; the built-in rule
+/// below defaults it to 1.
+pub const SIDEBAR_OPACITY: &str = "--viti-sidebar-opacity";
+
+/// The last value `name` is given anywhere in `css`, as an opacity clamped
+/// to 0..=1, or `None` when `css` never sets it. Comments are skipped;
+/// selectors are not checked, since the built-in rule reads the token
+/// wherever the cascade puts it.
+///
+/// Only a plain number counts. GTK keeps any custom-property declaration,
+/// so a later `80%` or typo still wins the cascade, but `alpha()` rejects it
+/// ("Expected a number") and the sidebar loses its background altogether.
+/// Such a value therefore reads as 1: it must not clear the window, or the
+/// sidebar would turn fully see-through, and it must still mask a value set
+/// earlier or by a lower-priority provider.
+pub fn opacity_in(css: &str, name: &str) -> Option<f32> {
+    let mut found = None;
+    let mut rest = css;
+    while let Some(index) = rest.find(['/', '-']) {
+        let tail = &rest[index..];
+        if let Some(comment) = tail.strip_prefix("/*") {
+            rest = comment.find("*/").map_or("", |end| &comment[end + 2..]);
+            continue;
+        }
+        let Some(after) = tail.strip_prefix(name) else {
+            rest = &tail[1..];
+            continue;
+        };
+        // `--viti-sidebar-opacity-foo` is a different property.
+        let Some(value) = after.trim_start().strip_prefix(':') else {
+            rest = after;
+            continue;
+        };
+        let end = value.find([';', '}', '\n']).unwrap_or(value.len());
+        let opacity = value[..end]
+            .trim()
+            .parse::<f32>()
+            .ok()
+            .filter(|o| o.is_finite())
+            .map_or(1.0, |o| o.clamp(0.0, 1.0));
+        found = Some(opacity);
+        rest = &value[end..];
+    }
+    found
+}
+
+/// The sidebar opacity the cascade ends up with. style.css sits at USER
+/// priority, above the Omarchy provider, so its value wins whenever it states
+/// one; otherwise the theme's, otherwise the built-in 1.
+pub fn sidebar_opacity(user: Option<f32>, theme: Option<f32>) -> f32 {
+    user.or(theme).unwrap_or(1.0)
 }
 
 /// Built-in rules, at APPLICATION priority. Everything is expressed against
@@ -142,6 +200,88 @@ tabbar tab:selected:active, tabbar tabbox.single-tab tab:selected:active {
 .viti-schema-list > row { border-bottom: 1px solid alpha(currentColor, 0.08); }
 .viti-schema-name { font-size: 1.02em; }
 .viti-validation-editor textview, .viti-validation-editor text { font-family: monospace; }
+/* Sidebar opacity: --viti-sidebar-opacity (a number from 0 to 1, not a
+ * percentage, which alpha() rejects) fades the sidebar's
+ * background but never its text. Set it in style.css or in an Omarchy
+ * theme's viti.css. Below 1, App::sync_window_transparency also clears the
+ * window background so the desktop shows through; everything else that sat
+ * on that background (the content side of the split view and the `:` command
+ * line; the banner, dialogs, popovers and toasts paint their own) gets it
+ * back here. Scoped to the split view so nested panes, which Adwaita keeps
+ * transparent, are left alone. */
+:root { --viti-sidebar-opacity: 1; }
+overlay-split-view > .sidebar-pane {
+    background-color: alpha(var(--sidebar-bg-color), var(--viti-sidebar-opacity));
+}
+overlay-split-view > .sidebar-pane:backdrop {
+    background-color: alpha(var(--sidebar-backdrop-color), var(--viti-sidebar-opacity));
+}
+window.viti-transparent { background-color: transparent; }
+window.viti-transparent .viti-content,
+window.viti-transparent .viti-cmdline-bar { background-color: var(--window-bg-color); }
 .viti-pulse { animation: viti-pulse 1s ease-in-out infinite alternate; }
 @keyframes viti-pulse { from { box-shadow: 0 0 0 0 alpha(var(--accent-bg-color), 0.6); } to { box-shadow: 0 0 0 4px alpha(var(--accent-bg-color), 0.0); } }
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sidebar_opacity_is_read_from_any_rule_and_the_last_one_wins() {
+        let css = "/* --viti-sidebar-opacity: 0.1; */\n\
+                   :root {\n  --viti-sidebar-opacity: 0.8;\n}\n\
+                   :root { --viti-sidebar-opacity:0.6 }\n";
+        assert_eq!(opacity_in(css, SIDEBAR_OPACITY), Some(0.6));
+        // Out of range clamps; look-alike names are ignored.
+        assert_eq!(
+            opacity_in(":root { --viti-sidebar-opacity: 2; }", SIDEBAR_OPACITY),
+            Some(1.0)
+        );
+        // GTK's alpha() takes only a number: a percentage or garbage leaves
+        // the sidebar without a background, so it must read as opaque, and
+        // as the last word it masks an earlier valid value.
+        for bad in ["75%", "lots", ""] {
+            let css = format!(":root {{ --viti-sidebar-opacity: {bad}; }}");
+            assert_eq!(opacity_in(&css, SIDEBAR_OPACITY), Some(1.0), "{bad}");
+        }
+        assert_eq!(
+            opacity_in(
+                ":root { --viti-sidebar-opacity: 0.8; }\n\
+                 :root { --viti-sidebar-opacity: 80%; }",
+                SIDEBAR_OPACITY
+            ),
+            Some(1.0)
+        );
+        assert_eq!(
+            opacity_in(":root { --viti-sidebar-opacity-x: 0.5; }", SIDEBAR_OPACITY),
+            None
+        );
+        assert_eq!(
+            opacity_in("/* --viti-sidebar-opacity: 0.5", SIDEBAR_OPACITY),
+            None
+        );
+    }
+
+    /// The seeded template only mentions the token inside its comment, so a
+    /// fresh style.css leaves the sidebar to the theme.
+    #[test]
+    fn the_template_states_no_opacity_and_the_builtin_defaults_to_opaque() {
+        assert!(TEMPLATE.contains(SIDEBAR_OPACITY));
+        assert_eq!(opacity_in(TEMPLATE, SIDEBAR_OPACITY), None);
+        assert_eq!(opacity_in(BUILTIN, SIDEBAR_OPACITY), Some(1.0));
+    }
+
+    /// style.css outranks the Omarchy provider, which outranks the default.
+    #[test]
+    fn the_user_stylesheet_beats_the_theme_which_beats_the_default() {
+        assert_eq!(sidebar_opacity(Some(0.9), Some(0.5)), 0.9);
+        assert_eq!(sidebar_opacity(None, Some(0.5)), 0.5);
+        assert_eq!(sidebar_opacity(Some(1.0), Some(0.5)), 1.0);
+        assert_eq!(sidebar_opacity(None, None), 1.0);
+        // A percentage in style.css still wins the cascade, so it keeps the
+        // window opaque even over a theme's valid value.
+        let user = opacity_in(":root { --viti-sidebar-opacity: 80%; }", SIDEBAR_OPACITY);
+        assert_eq!(sidebar_opacity(user, Some(0.5)), 1.0);
+    }
+}
