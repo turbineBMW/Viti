@@ -116,6 +116,9 @@ pub fn build(app: &adw::Application, sidebar: &gtk::Widget, cmdline: &gtk::Widge
     tab_view.set_vexpand(true);
     content_stack.add_named(&tab_view, Some("tabs"));
     let content_view = adw::ToolbarView::new();
+    // Painted with the window background by `style::BUILTIN` whenever a
+    // translucent sidebar clears the window's own.
+    content_view.add_css_class("viti-content");
     content_view.add_top_bar(&header);
     content_view.set_content(Some(&content_stack));
 
@@ -146,6 +149,7 @@ pub fn build(app: &adw::Application, sidebar: &gtk::Widget, cmdline: &gtk::Widge
         .transition_duration(120)
         .reveal_child(false)
         .child(cmdline)
+        .css_classes(["viti-cmdline-bar"])
         .build();
 
     let banner = adw::Banner::builder().revealed(false).build();

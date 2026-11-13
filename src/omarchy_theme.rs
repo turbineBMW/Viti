@@ -1,6 +1,6 @@
 //! Apply the active Omarchy palette to GTK and follow theme switches live.
 
-use crate::{accent, omarchy};
+use crate::{accent, omarchy, style};
 use adw::prelude::*;
 use gtk::{gio, glib};
 use gtk4 as gtk;
@@ -21,6 +21,10 @@ struct Inner {
     fallback: Cell<adw::ColorScheme>,
     provider: gtk::CssProvider,
     monitor: RefCell<Option<gio::FileMonitor>>,
+    /// `--viti-sidebar-opacity` as the loaded theme states it, if it does.
+    sidebar_opacity: Cell<Option<f32>>,
+    /// Run after every reload, once the provider holds the new CSS.
+    on_reload: RefCell<Option<Box<dyn Fn()>>>,
 }
 
 impl OmarchyTheme {
@@ -32,6 +36,8 @@ impl OmarchyTheme {
             fallback: Cell::new(adw::ColorScheme::Default),
             provider: gtk::CssProvider::new(),
             monitor: RefCell::new(None),
+            sidebar_opacity: Cell::new(None),
+            on_reload: RefCell::new(None),
         });
         gtk::style_context_add_provider_for_display(
             display,
@@ -55,6 +61,17 @@ impl OmarchyTheme {
         self.inner.fallback.set(fallback);
         self.inner.reload();
     }
+
+    /// The sidebar opacity the active theme asks for, or `None` when it
+    /// states none or the theme isn't being followed.
+    pub fn sidebar_opacity(&self) -> Option<f32> {
+        self.inner.sidebar_opacity.get()
+    }
+
+    /// Call `f` after each reload, including the ones a theme switch makes.
+    pub fn connect_reloaded(&self, f: impl Fn() + 'static) {
+        self.inner.on_reload.replace(Some(Box::new(f)));
+    }
 }
 
 impl Inner {
@@ -66,6 +83,11 @@ impl Inner {
             .flatten();
         self.provider
             .load_from_string(theme.as_ref().map_or("", |theme| theme.css.as_str()));
+        self.sidebar_opacity.set(
+            theme
+                .as_ref()
+                .and_then(|theme| style::opacity_in(&theme.css, style::SIDEBAR_OPACITY)),
+        );
 
         let manager = adw::StyleManager::default();
         let was_dark = manager.is_dark();
@@ -77,6 +99,9 @@ impl Inner {
         });
         if accent_changed && manager.is_dark() == was_dark {
             accent::notify();
+        }
+        if let Some(on_reload) = self.on_reload.borrow().as_ref() {
+            on_reload();
         }
     }
 

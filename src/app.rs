@@ -59,6 +59,9 @@ pub struct App {
     style_provider: gtk::CssProvider,
     omarchy_theme: RefCell<Option<crate::omarchy_theme::OmarchyTheme>>,
     style_monitor: RefCell<Option<gio::FileMonitor>>,
+    /// `--viti-sidebar-opacity` as style.css states it, if it does; read on
+    /// every reload. See [`Self::sync_window_transparency`].
+    user_sidebar_opacity: Cell<Option<f32>>,
     keybindings_monitor: RefCell<Option<gio::FileMonitor>>,
     save_source: RefCell<Option<glib::SourceId>>,
     connecting: RefCell<HashSet<ConnectionId>>,
@@ -109,6 +112,7 @@ impl App {
             style_provider: gtk::CssProvider::new(),
             omarchy_theme: RefCell::new(None),
             style_monitor: RefCell::new(None),
+            user_sidebar_opacity: Cell::new(None),
             keybindings_monitor: RefCell::new(None),
             save_source: RefCell::new(None),
             connecting: RefCell::new(HashSet::new()),
@@ -313,15 +317,44 @@ impl App {
         self.reload_user_css();
     }
 
-    fn install_omarchy_theme(&self) {
+    fn install_omarchy_theme(self: &Rc<Self>) {
         if let Some(display) = gtk::gdk::Display::default() {
-            self.omarchy_theme
-                .replace(Some(crate::omarchy_theme::OmarchyTheme::install(&display)));
+            let theme = crate::omarchy_theme::OmarchyTheme::install(&display);
+            let a = Rc::downgrade(self);
+            theme.connect_reloaded(move || {
+                if let Some(a) = a.upgrade() {
+                    a.sync_window_transparency();
+                }
+            });
+            self.omarchy_theme.replace(Some(theme));
         }
     }
 
     pub fn reload_user_css(&self) {
-        self.style_provider.load_from_string(&crate::style::load());
+        let css = crate::style::load();
+        self.style_provider.load_from_string(&css);
+        self.user_sidebar_opacity.set(crate::style::opacity_in(
+            &css,
+            crate::style::SIDEBAR_OPACITY,
+        ));
+        self.sync_window_transparency();
+    }
+
+    /// A translucent sidebar needs the window behind it cleared, or it only
+    /// shows the opaque window background. The "viti-transparent" class does
+    /// that; `style::BUILTIN` repaints the rest of the window under it.
+    fn sync_window_transparency(&self) {
+        let theme = self
+            .omarchy_theme
+            .borrow()
+            .as_ref()
+            .and_then(|theme| theme.sidebar_opacity());
+        let opacity = crate::style::sidebar_opacity(self.user_sidebar_opacity.get(), theme);
+        if opacity < 1.0 {
+            self.window.add_css_class("viti-transparent");
+        } else {
+            self.window.remove_css_class("viti-transparent");
+        }
     }
 
     fn watch_file(
