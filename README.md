@@ -103,11 +103,8 @@ The theme's `colors.toml` is still required: it decides light or dark mode
 and the accent of drawn charts. Viti's own `~/.config/viti/style.css` remains
 the final override.
 
-For a see-through sidebar, set `--viti-sidebar-opacity` to a number from 0
-to 1 (not a percentage) in a `:root` rule, in `style.css` or for every theme
-in the template. It fades only the sidebar's background, not its text:
-
-```css
-/* ~/.config/omarchy/themed/viti.css.tpl or ~/.config/viti/style.css */
-:root { --viti-sidebar-opacity: 0.8; }
-```
+For a see-through sidebar, turn on **Preferences → General → Transparent sidebar** and set
+how opaque it is with **Sidebar opacity**. It fades only the sidebar's background, not its
+text. The setting is Viti's own, so it works without Omarchy, and neither a theme's
+`viti.css` nor `style.css` changes it. (Those used to set `--viti-sidebar-opacity`; the first
+launch with this setting carries that value over.)

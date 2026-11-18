@@ -131,6 +131,10 @@ pub struct Settings {
     pub export_driver_code: bool,
     /// Aggregations page: re-run stage previews while typing.
     pub agg_auto_preview: bool,
+    /// Fade the sidebar's background so the desktop shows through.
+    pub transparent_sidebar: bool,
+    /// How opaque that background is, from 0 (clear) to 1 (solid).
+    pub sidebar_opacity: f32,
 }
 
 impl Default for Settings {
@@ -140,6 +144,8 @@ impl Default for Settings {
             max_time_ms: 60_000,
             theme: Theme::System,
             follow_omarchy_theme: true,
+            transparent_sidebar: false,
+            sidebar_opacity: 0.8,
             default_sort: String::new(),
             protect_connection_strings: false,
             page_size: 25,
@@ -623,6 +629,16 @@ pub fn load() -> Config {
         queries: read_json(&queries_path()),
         pipelines: read_json(&pipelines_path()),
     }
+}
+
+/// Whether config.json already states the transparent-sidebar setting. Before it existed the
+/// opacity came from CSS (see `App::adopt_css_sidebar_opacity`); a file without it hasn't been
+/// migrated yet.
+pub fn has_sidebar_setting() -> bool {
+    fs::read_to_string(config_path())
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .is_some_and(|v| v.get("transparent_sidebar").is_some())
 }
 
 pub fn save(cfg: &Config) {
