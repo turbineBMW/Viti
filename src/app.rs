@@ -61,7 +61,8 @@ pub struct App {
     style_monitor: RefCell<Option<gio::FileMonitor>>,
     /// `--viti-sidebar-opacity` as style.css states it, if it does; read on
     /// every reload. See [`Self::sync_window_transparency`].
-    user_sidebar_opacity: Cell<Option<f32>>,
+    /// `--viti-sidebar-opacity` from the settings, above style.css.
+    sidebar_provider: gtk::CssProvider,
     keybindings_monitor: RefCell<Option<gio::FileMonitor>>,
     save_source: RefCell<Option<glib::SourceId>>,
     connecting: RefCell<HashSet<ConnectionId>>,
@@ -112,7 +113,7 @@ impl App {
             style_provider: gtk::CssProvider::new(),
             omarchy_theme: RefCell::new(None),
             style_monitor: RefCell::new(None),
-            user_sidebar_opacity: Cell::new(None),
+            sidebar_provider: gtk::CssProvider::new(),
             keybindings_monitor: RefCell::new(None),
             save_source: RefCell::new(None),
             connecting: RefCell::new(HashSet::new()),
@@ -154,6 +155,8 @@ impl App {
         app.watch_user_css();
         app.watch_keybindings();
         app.apply_theme();
+        app.adopt_css_sidebar_opacity();
+        app.apply_sidebar();
         crate::ui::watch_scheme();
         crate::dispatch::install(&app);
         app.install_window_actions();
@@ -320,36 +323,56 @@ impl App {
     fn install_omarchy_theme(self: &Rc<Self>) {
         if let Some(display) = gtk::gdk::Display::default() {
             let theme = crate::omarchy_theme::OmarchyTheme::install(&display);
-            let a = Rc::downgrade(self);
-            theme.connect_reloaded(move || {
-                if let Some(a) = a.upgrade() {
-                    a.sync_window_transparency();
-                }
-            });
             self.omarchy_theme.replace(Some(theme));
+            // Above style.css too: the setting is the one place the opacity is decided.
+            gtk::style_context_add_provider_for_display(
+                &display,
+                &self.sidebar_provider,
+                gtk::STYLE_PROVIDER_PRIORITY_USER + 1,
+            );
         }
     }
 
     pub fn reload_user_css(&self) {
         let css = crate::style::load();
         self.style_provider.load_from_string(&css);
-        self.user_sidebar_opacity.set(crate::style::opacity_in(
-            &css,
-            crate::style::SIDEBAR_OPACITY,
-        ));
-        self.sync_window_transparency();
     }
 
-    /// A translucent sidebar needs the window behind it cleared, or it only
-    /// shows the opaque window background. The "viti-transparent" class does
-    /// that; `style::BUILTIN` repaints the rest of the window under it.
-    fn sync_window_transparency(&self) {
+    /// Before the Transparent sidebar setting, style.css or the Omarchy theme's viti.css set
+    /// `--viti-sidebar-opacity`. The first launch with the setting carries that value over,
+    /// once, so nothing changes on screen; after that only the setting counts.
+    fn adopt_css_sidebar_opacity(self: &Rc<Self>) {
+        if crate::config::has_sidebar_setting() {
+            return;
+        }
+        let user = crate::style::opacity_in(&crate::style::load(), crate::style::SIDEBAR_OPACITY);
         let theme = self
             .omarchy_theme
             .borrow()
             .as_ref()
             .and_then(|theme| theme.sidebar_opacity());
-        let opacity = crate::style::sidebar_opacity(self.user_sidebar_opacity.get(), theme);
+        let opacity = crate::style::sidebar_opacity(user, theme);
+        if opacity < 1.0 {
+            let settings = &mut self.config.borrow_mut().settings;
+            settings.transparent_sidebar = true;
+            settings.sidebar_opacity = opacity;
+        }
+        crate::config::save(&self.config.borrow());
+    }
+
+    /// State the sidebar opacity the settings ask for. A translucent sidebar
+    /// also needs the window behind it cleared, or it only shows the opaque
+    /// window background: the "viti-transparent" class does that, and
+    /// `style::BUILTIN` repaints the rest of the window under it.
+    pub fn apply_sidebar(&self) {
+        let opacity = {
+            let settings = &self.config.borrow().settings;
+            crate::style::setting_opacity(settings.transparent_sidebar, settings.sidebar_opacity)
+        };
+        self.sidebar_provider.load_from_string(&format!(
+            ":root {{ {}: {opacity:.2}; }}",
+            crate::style::SIDEBAR_OPACITY
+        ));
         if opacity < 1.0 {
             self.window.add_css_class("viti-transparent");
         } else {

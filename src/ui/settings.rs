@@ -230,6 +230,45 @@ pub fn show(app: &Rc<App>) {
         }
         theme_group.add(&omarchy_row);
     }
+    let transparent_row = adw::SwitchRow::builder()
+        .title("Transparent sidebar")
+        .subtitle("Show the desktop behind the sidebar")
+        .active(cfg.transparent_sidebar)
+        .build();
+    let opacity_row = adw::ActionRow::builder().title("Sidebar opacity").build();
+    let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1.0, 0.05);
+    scale.set_value(cfg.sidebar_opacity as f64);
+    scale.set_draw_value(true);
+    scale.set_value_pos(gtk::PositionType::Left);
+    scale.set_hexpand(true);
+    scale.set_width_request(160);
+    scale.set_valign(gtk::Align::Center);
+    scale.set_format_value_func(|_, value| format!("{}%", (value * 100.0).round()));
+    opacity_row.add_suffix(&scale);
+    opacity_row.set_activatable_widget(Some(&scale));
+    transparent_row
+        .bind_property("active", &opacity_row, "sensitive")
+        .sync_create()
+        .build();
+    {
+        let app = app.clone();
+        transparent_row.connect_active_notify(move |row| {
+            app.config.borrow_mut().settings.transparent_sidebar = row.is_active();
+            app.apply_sidebar();
+            app.schedule_save();
+        });
+    }
+    {
+        let app = app.clone();
+        scale.connect_value_changed(move |scale| {
+            app.config.borrow_mut().settings.sidebar_opacity =
+                ((scale.value() * 100.0).round() / 100.0) as f32;
+            app.apply_sidebar();
+            app.schedule_save();
+        });
+    }
+    theme_group.add(&transparent_row);
+    theme_group.add(&opacity_row);
     general.add(&theme_group);
     dialog.add(&general);
 

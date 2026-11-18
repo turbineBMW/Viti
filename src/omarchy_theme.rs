@@ -22,9 +22,8 @@ struct Inner {
     provider: gtk::CssProvider,
     monitor: RefCell<Option<gio::FileMonitor>>,
     /// `--viti-sidebar-opacity` as the loaded theme states it, if it does.
+    /// Only read once, to carry a theme's old value into the setting.
     sidebar_opacity: Cell<Option<f32>>,
-    /// Run after every reload, once the provider holds the new CSS.
-    on_reload: RefCell<Option<Box<dyn Fn()>>>,
 }
 
 impl OmarchyTheme {
@@ -37,7 +36,6 @@ impl OmarchyTheme {
             provider: gtk::CssProvider::new(),
             monitor: RefCell::new(None),
             sidebar_opacity: Cell::new(None),
-            on_reload: RefCell::new(None),
         });
         gtk::style_context_add_provider_for_display(
             display,
@@ -67,11 +65,6 @@ impl OmarchyTheme {
     pub fn sidebar_opacity(&self) -> Option<f32> {
         self.inner.sidebar_opacity.get()
     }
-
-    /// Call `f` after each reload, including the ones a theme switch makes.
-    pub fn connect_reloaded(&self, f: impl Fn() + 'static) {
-        self.inner.on_reload.replace(Some(Box::new(f)));
-    }
 }
 
 impl Inner {
@@ -99,9 +92,6 @@ impl Inner {
         });
         if accent_changed && manager.is_dark() == was_dark {
             accent::notify();
-        }
-        if let Some(on_reload) = self.on_reload.borrow().as_ref() {
-            on_reload();
         }
     }
 

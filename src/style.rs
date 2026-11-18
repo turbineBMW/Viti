@@ -26,9 +26,8 @@ pub const TEMPLATE: &str = r#"/* viti-appearance-schema: 1
  *   .viti-tile           one explain-plan stat tile
  *   .viti-schema-row     one field row on the Schema page
  *
- * A see-through sidebar (a number from 0 to 1; fades its background, never
- * its text):
- *   :root { --viti-sidebar-opacity: 0.85; }
+ * A see-through sidebar is a setting now: Preferences → General →
+ * Transparent sidebar.
  */
 "#;
 
@@ -45,9 +44,9 @@ pub fn load() -> String {
     }
 }
 
-/// How opaque the sidebar's background is, a number from 0 to 1. Set by
-/// hand in style.css or by an Omarchy theme's `viti.css`; the built-in rule
-/// below defaults it to 1.
+/// How opaque the sidebar's background is, a number from 0 to 1. The
+/// Transparent sidebar setting states it (`App::apply_sidebar`); style.css and
+/// an Omarchy theme's `viti.css` used to. The built-in rule defaults it to 1.
 pub const SIDEBAR_OPACITY: &str = "--viti-sidebar-opacity";
 
 /// The last value `name` is given anywhere in `css`, as an opacity clamped
@@ -92,9 +91,19 @@ pub fn opacity_in(css: &str, name: &str) -> Option<f32> {
     found
 }
 
-/// The sidebar opacity the cascade ends up with. style.css sits at USER
-/// priority, above the Omarchy provider, so its value wins whenever it states
-/// one; otherwise the theme's, otherwise the built-in 1.
+/// The opacity the settings ask for: 1 when the sidebar isn't transparent.
+pub fn setting_opacity(transparent: bool, opacity: f32) -> f32 {
+    if transparent {
+        opacity.clamp(0.0, 1.0)
+    } else {
+        1.0
+    }
+}
+
+/// The sidebar opacity the CSS cascade used to end up with, before it was a
+/// setting: style.css sits at USER priority, above the Omarchy provider, so
+/// its value wins whenever it states one; otherwise the theme's, otherwise
+/// the built-in 1. Only read once now, to carry an existing look over.
 pub fn sidebar_opacity(user: Option<f32>, theme: Option<f32>) -> f32 {
     user.or(theme).unwrap_or(1.0)
 }
@@ -202,8 +211,8 @@ tabbar tab:selected:active, tabbar tabbox.single-tab tab:selected:active {
 .viti-validation-editor textview, .viti-validation-editor text { font-family: monospace; }
 /* Sidebar opacity: --viti-sidebar-opacity (a number from 0 to 1, not a
  * percentage, which alpha() rejects) fades the sidebar's
- * background but never its text. Set it in style.css or in an Omarchy
- * theme's viti.css. Below 1, App::sync_window_transparency also clears the
+ * background but never its text. Preferences sets it (App::apply_sidebar
+ * states it above every other stylesheet). Below 1, it also clears the
  * window background so the desktop shows through; everything else that sat
  * on that background (the content side of the split view and the `:` command
  * line; the banner, dialogs, popovers and toasts paint their own) gets it
@@ -226,6 +235,13 @@ window.viti-transparent .viti-cmdline-bar { background-color: var(--window-bg-co
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_setting_only_fades_the_sidebar_while_it_is_on() {
+        assert_eq!(setting_opacity(true, 0.8), 0.8);
+        assert_eq!(setting_opacity(false, 0.3), 1.0);
+        assert_eq!(setting_opacity(true, 1.5), 1.0);
+    }
 
     #[test]
     fn sidebar_opacity_is_read_from_any_rule_and_the_last_one_wins() {
@@ -267,7 +283,8 @@ mod tests {
     /// fresh style.css leaves the sidebar to the theme.
     #[test]
     fn the_template_states_no_opacity_and_the_builtin_defaults_to_opaque() {
-        assert!(TEMPLATE.contains(SIDEBAR_OPACITY));
+        // The template points to the setting rather than the token.
+        assert!(TEMPLATE.contains("Transparent sidebar"));
         assert_eq!(opacity_in(TEMPLATE, SIDEBAR_OPACITY), None);
         assert_eq!(opacity_in(BUILTIN, SIDEBAR_OPACITY), Some(1.0));
     }
